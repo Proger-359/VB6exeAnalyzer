@@ -1,0 +1,15 @@
+# VB6 source
+*.bas linguist-language=VisualBasic
+*.cls linguist-language=VisualBasic
+*.frm linguist-language=VisualBasic
+*.ctl linguist-language=VisualBasic
+
+# VB6 project files (INI-like)
+*.vbp linguist-language=INI
+*.vbw linguist-language=INI
+*.vbg linguist-language=INI
+
+# binaries
+*.exe binary
+*.dll binary
+*.ocx binary
