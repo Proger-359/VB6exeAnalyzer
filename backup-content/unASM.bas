@@ -150,6 +150,11 @@ i = EntryPoint
 ml = i + CodeLen
 rvai = ImageRva
 
+If i < 100 Then
+    Stop
+    Exit Sub
+End If
+
     Do
         Get #Fpt, i, Fbyte
         Get #Fpt, i, FLong
@@ -182,6 +187,10 @@ Private Function GetVASM(StartPos As Long, ByVal iOpCode As Integer) As Long
 'renvoi un pointeur dans la table TblASM_OPCODE
 Dim i
 i = StartPos
+If i <= 0 Then
+    GetVASM = 1
+    Exit Function
+End If
     
     Do While i <= TblASM_len
         If TblASM_OPCODE(i).OpCodeLen = 1 Then

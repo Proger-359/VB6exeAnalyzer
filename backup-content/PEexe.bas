@@ -415,7 +415,10 @@ Dim bArray() As Byte
 
 WasVB:
     'servira...
-
+    ParseVBFunc (fp)
+    
+    Close #fp
+    
 End Sub
 
 Sub OpenEXE(ByVal FFname As String)
@@ -1138,13 +1141,22 @@ Dim useStr As String
                 exeVB_CTRL_PRP(i).pHeight = gpLng
                 
             Case 19 'VB.Menu
+                'tweak de Urgo (vbfrance)
                 Get #FilePointer, Offs, gpInt
-                exeVB_CTRL_PRP(i).sCaption = ScanString(FilePointer, Offs + 2)
+                If gpInt = 768 Then
+                   exeVB_CTRL_PRP(i).sCaption = ScanString(FilePointer, Offs + 4)
+                Else
+                   exeVB_CTRL_PRP(i).sCaption = ScanString(FilePointer, Offs + 2)
+                End If
+                '/tweak
+                
                 Offs = rvaEnd - 3
                 'Offs = Offs + gpInt + 3
                 Get #FilePointer, Offs, gpInt
                 exeVB_CTRL_PRP(i).pRank = gpInt
-            
+
+
+
             Case 20 'VB.MDIForm
                 Get #FilePointer, Offs, gpInt
                 exeVB_CTRL_PRP(i).sCaption = ScanString(FilePointer, Offs + 2)
@@ -2000,6 +2012,8 @@ With ATree
                 
                 Do While j <= k
                 
+                    If exeIMPORT_APINAME(j).ApiName = "" Then Exit Do
+                
                     .Nodes.Add LCase$(exeIMPORT_DLLNAME(i).DllName), 4, exeIMPORT_APINAME(j).ApiName, exeIMPORT_APINAME(j).ApiName, 14
                     .Nodes.Add exeIMPORT_APINAME(j).ApiName, 4, , "Offset " & Hex(exeIMPORT_APINAME(j).Address) & "h", 16
                     
@@ -2634,6 +2648,19 @@ Dim i, j, k
     Else
         VBCTRL_CollectionPrint = inName
         outIndex = vbNullString
+    End If
+
+End Function
+
+Function Utils_EXEfilename(ByRef fullpath As String) As String
+'renvoi que le nom du fichier à la fin d'un nom complet (dossier + fichier)
+Dim p
+
+    p = InStrRev(fullpath, "\")
+    If p > 0 Then
+        Utils_EXEfilename = Mid$(fullpath, p + 1)
+    Else
+        Utils_EXEfilename = fullpath
     End If
 
 End Function

@@ -1,5 +1,5 @@
 VERSION 5.00
-Object = "{F9043C88-F6F2-101A-A3C9-08002B2F49FB}#1.2#0"; "comdlg32.ocx"
+Object = "{F9043C88-F6F2-101A-A3C9-08002B2F49FB}#1.2#0"; "COMDLG32.OCX"
 Begin VB.Form frmPeExe 
    BorderStyle     =   1  'Fixed Single
    Caption         =   "Analyseur de programme VB6 compilé - Proger 2003"
@@ -238,12 +238,14 @@ Private Sub Command12_Click()
 'tente de décompresser manuellement un fichier packé (méthode du Process Dumping, imparable :op )
 'puis tente d'analyser le contenu dépacké, si d'un exe VB6 il s'agit.
 'Faites gaffe, si l'exe est packé, surement que sa license vous interdit de le dépacké...
-Dim r, lpid, g
+Dim r, lpid, g, d
 Dim bArray() As Byte
 Dim sAr() As String, lSz() As Long, lAdr() As Long, lID() As Long
 Dim TempWork As Object
 Set TempWork = New MemWork '<== une classe que j'ai dev ya bien longtemps...
 'en fait, si je ne vous passe pas MemWork.cls, vous pourrez pas dépacké... mmh, interessant :p
+
+    d = vbCancel
 
     r = MsgBox("Attention! vous avez choisi de décompressé un PE auto-compressé! Si l'auteur du programmea choisi de protéger son application via cette méthode, vous risquez des poursuites judiciaires si vous divulgez le code décompressé. Continuer ?", vbCritical + vbYesNoCancel, "UnPacking")
     If r = vbYes Then
@@ -255,8 +257,10 @@ Set TempWork = New MemWork '<== une classe que j'ai dev ya bien longtemps...
         lpid = Shell(Text1.Text, vbHide)
         g = TempWork.GetPIDModule(lpid, sAr(), lID(), lSz(), lAdr())
         If g = -1 Then MsgBox "Echec de l'ouverture du processus": Exit Sub
+        
         g = TempWork.DumpModulePID(lpid, bArray(), lAdr(1), lSz(1))
         If g = -1 Then MsgBox "Echec de dump du processus": Exit Sub
+        
         g = TempWork.SaveDumpToFile(bArray(), "dumpexeanalyse.exe")
         If g = -1 Then MsgBox "Echec de sauvegarde du processsus": Exit Sub
         
@@ -270,11 +274,19 @@ Set TempWork = New MemWork '<== une classe que j'ai dev ya bien longtemps...
                 Label4.Caption = "Cet exécutable dépacké ne semble pas être de VB"
             End If
 
-            MsgBox "Analyse terminé. Le fichier dépacké a été supprimé.", vbInformation + vbOKOnly, "UnPacking"
+            'MsgBox "Analyse terminé. Le fichier dépacké a été supprimé.", vbInformation + vbOKOnly, "UnPacking"
+            d = MsgBox("Analyse terminé. Voulez-vous conserver la version dépacké du fichier ?", vbQuestion + vbYesNoCancel, "UnPacking")
             Close
         End If
-        Kill "dumpexeanalyse.exe"
+        If d <> vbYes Then
+            Kill "dumpexeanalyse.exe"
+        Else
+            Name "dumpexeanalyse.exe" As App.Path & "\unpacked_" & Utils_EXEfilename(Text1.Text)
+            exeFILENAMElong = App.Path & "\unpacked_" & Utils_EXEfilename(Text1.Text)
+        End If
     End If
+    
+    'If exeISVB Then Call Command10_Click
 
 End Sub
 
@@ -402,3 +414,4 @@ End Sub
 Private Sub Form_QueryUnload(Cancel As Integer, UnloadMode As Integer)
 End
 End Sub
+

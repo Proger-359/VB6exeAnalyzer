@@ -129,8 +129,9 @@ Attribute VB_Exposed = False
 DefLng A-Z
 
 Private Sub Arbre_NodeClick(ByVal Node As MSComctlLib.Node)
-Dim i, fp As Integer
+Dim i, fp As Long
 Dim Pmr As frmList
+Dim NodeHexStr As String
 
 If Node.Parent Is Nothing Then Exit Sub
 'si on doubleclique sur une entrée de sub, on ouvre l'éditeur hexa
@@ -158,7 +159,9 @@ ElseIf Left$(Node.Parent, 17) = "Point d'entrée : " Then
     Pmr.inList.FontName = "Courier New": Pmr.inList.FontSize = 8
     i = InStrRev(Node.Text, " ") + 1
     'ici i = point d'entrée
-    i = Val("&H" & Mid$(Node.Text, i, Len(Node.Text) - i))
+    NodeHexStr = "&H" & Mid$(Node.Text, i, Len(Node.Text) - i)
+    If Right$(NodeHexStr, 1) = "h" Then NodeHexStr = Left$(NodeHexStr, Len(NodeHexStr) - 1)
+    i = CLng(NodeHexStr)
 
     fp = FreeFile
     Open PEexe.exeFILENAMElong For Binary Access Read As #fp

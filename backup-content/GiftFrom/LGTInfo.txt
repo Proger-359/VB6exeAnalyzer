@@ -1,0 +1,57 @@
+Français|English|Deutsch|0
+&Fichier|&File|&Datei|1
+Ouvrir|Open|Öffnen|2
+Enregistrer le programme sous...|Save program as...|Speichern unter...|3
+Enregistrer le projet sous...|Save project as...|Projekt speichern als...|4
+Quitter|Exit|Beenden|5
+Outils|Tools|Hilfsprogramme|6
+Fichiers systèmes utilisées...|Systems files used...|Verwendete Systemdateien|7
+Rechercher des programmes VB|Search VB programs|VB Programme suchen|8
+A &propos...|About...|Über...|9
+Enregistrer sous...|Save program as...|Speichern unter...|10
+Tous les fichiers (*.*)|All Files (*.*)|Alle Dateien (*.*)|11
+Programmes (*.exe)|Programs (*.exe)|Programme (*.exe)|12
+Ecrans de veille (*.scr)|ScreenSavers (*.scr)|Bildschirmschoner (*.scr)|13
+existe déjà.|already exist.|existiert bereits.|14
+Voulez-vous le remplacer ?|Do you want to replace it ?|Datei(en) ersetzen?|15
+Voulez-vous ouvrir|Do you want open|Öffnen von|16
+maintenant ?|now ?|jetzt?|17
+Ouverture du projet...|Opening project...|Projekt öffnen...|18
+Executer|Execute|Ausführen|19
+Texte/Code|Text/Code|Text/Code|20
+Edition/Propriétés|Edit/Properties|Bearbeiten/Eigenschaften|21
+Contrôles externes/Fichiers systèmes|Externals controls/Systems Files|Externe Kontrollen/Systemdateien|22
+Aperçu|Survey|Zusammenfassung|23
+Taille du fichier: |File size: |Dateigrösse: |24
+Temps de reformation: |Reformation time: |Umwandlungszeit: |25
+<Librairie incorrecte>|<Library failed>|<Bibliotheksfehler>|26
+Taille totale du fichier: |Total file size: |Gesammte Dateigrösse: |27
+Nombre de documents: |Number of documents: |Anzahl der Dokumente: |28
+A propos de VBReFormer ...|About VBReFormer ...|Über VBReFormer ...|29
+@Warning|@Warning|Johannes Nagel|30
+Cet outil est un freeware (donc libre et gratuit) qui permet de reconstituer la structure des fichiers .frm, .ctl, etc, des programmes créés via MS Visual Basic 4, 5 et 6, mais sans reconstituer les sources ...|This tool is a freeware (so free and deliverable) that allow to reconstruct files structures of .frm, .ctl, etc, from programs created via MS Visual Basic 4, 5 et 6, but without reconstruct sources codes ...|VBReformer ist Freeware (umsonst && kopierbar) und ermölicht die Rekonstruktion der Struktur von VisualBasic 4/5/6 Dateien mit den Endungen frm, ctl && ctc. Der Sourcecode bleibt davon unberührt...|31
+L'auteur n'est en aucun cas responsable des actes && dommages provoquées par l'utilisation de ce programme.|The author isn't on none case responsible of act && dammages provoked by the utilisation of this program !!!|Der Autor ist nicht verantwortlich für die Programmanwendung sowie dadurch entstehenden Schaden!|32
+-Auteur:|-Author:|-Autor:|33
+-Mon e-mail:|-My e-mail:|-e-Mail:|34
+-Mon site:|-My website:|-WWW-Seite:|35
+>>> Partenaires <<<|>>> Partners <<<|>>> Partner <<<|36
+Fichier:|File:|Datei:|37
+Analyser|Analyze|Analysieren|38
+Fichier|File|Datei|39
+Disponible|Available|Verfügbarkeit|40
+Emplacement|Location|Position|41
+Rechercher des fichiers systèmes dans un programme...|Search systems files from a programs...|Suchen der Systemdateien zu einem Programm...|42
+Langue|Language|Sprache|43
+Rec&hercher maintenant|Sea&rch now|Jetzt &suchen|44
+&Ouvrir ...|&Open ...|Ö&ffnen ...|45
+&Exécuter ...|&Execute ...|&Ausführen ...|46
+&Rechercher dans :|&Search in :|&Suchen in:|47
+Compilé avec :|Compiled with :|kompilieren mit :|48
+&Nommé :|&Name :|&Name :|49
+Annuler la recherche|Cancel search|Suche Abbrechen|50
+Compilé avec|Compiled with|Kompiliert mit|51
+Compilateur inconnu|Unknowned compiler|Unbekannter Compiler|52
+Choisir le répertoire de recherche ...|Choose search location...|Suchbereich bestimmen...|53
+ fichiers trouvées...| files founded...|Dateien gefunden...|54
+-Merci beaucoup pour les traductions à:|-With thanks for the translations:|(-With thanks for the translations:)|55
+Explorateur de librairies|Library explorer|Bibliothek explodieren|56
