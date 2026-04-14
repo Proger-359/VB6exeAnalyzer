@@ -5,6 +5,7 @@ Attribute VB_Name = "PEexe"
 '
 'Par Proger
 'aout 2003
+'reprise septembre 2005
 '
 ' Explore l'intérieur d'un fichier exécutable portable (PE), optimisé pour VB6
 '
@@ -15,8 +16,11 @@ Attribute VB_Name = "PEexe"
 'dire que je n'ai pas "du tout" utiliser les sources "décompilateur" que l'on trouve ici est là
 'serai faux : en effet, elles m'ont donné un aperçu de ce que ce code devra minimum faire ;)
 'néanmoins j'ai volontairement refusé d'utiliser du code de ces sources pour éviter de copier leurs bogues.
-
-'source à usage privé (et hop, l'excuse universelle pour dire basta aux commentaires)
+'
+'Pour des raisons de copyright, ancienneté et droit d'auteur :
+'L'auteur de cette source (connu sous le pseudonyme Proger) ne pourra en aucun cas être tenu pour responsable
+'de l'utilisation de cette source dans le cadre de perte ou destruction de données, ingéniérie a rebourt, vol
+'ou détournement de propriété intellectuel, contrefaçon ou plagiat.
 
 DefLng A-Z
 Option Explicit
@@ -176,9 +180,17 @@ End Type
     Type IMPORT_API_LOOKUP
         ApiName As String
         Address As Long
+        VaTbl As Long
     End Type
-    Private exeIMPORT_DLLNAME() As IMPORT_DLL_LOOKUP
-    Private exeIMPORT_APINAME() As IMPORT_API_LOOKUP
+    Public exeIMPORT_DLLNAME() As IMPORT_DLL_LOOKUP
+    Public exeIMPORT_APINAME() As IMPORT_API_LOOKUP
+
+    'DEASM : table de recherche inverse via call+jmp vers dll vb
+    Public Type VB_APICALLS
+        rva As Long
+        ApiVbDefPtr As Long
+    End Type
+    Public exeVB6_APICALLS() As VB_APICALLS
 
 'Exportation (en dev)
 Type IMAGE_EXPORT_DESCRIPTOR
@@ -235,10 +247,12 @@ Type CONTROL_FORM
     DefLen As Long   'nombre de contrôle contenu
 End Type
     Type CONTROL_DEF
-        sName As String 'nom "name" du contrôle
-        id As Integer   'identifiant type de contrôle
-        sType As String 'type de contrôle
-        Offset As Long  'offset physique (pour récupérer les propriétés/attributs)
+        sName As String  'nom "name" du contrôle
+        id As Integer    'identifiant type de contrôle
+        sType As String  'type de contrôle
+        offset As Long   'offset physique (pour récupérer les propriétés/attributs)
+        LenTr As Long    'nombre d'octets définissant l'objet
+        frmID As Integer 'identifiant ordre d'apparition dans le form
     End Type
         Private Type CONTROL_IDTYPE 'type de contrôle (pure VB seulement)
             inID As Integer
@@ -255,7 +269,7 @@ End Type
         pRank As Long 'sous-bloc de controle,...
         sCaption As String
     End Type
-Private exeVB_CONTROL() As CONTROL_DEF
+Public exeVB_CONTROL() As CONTROL_DEF
     Public exeVB_PROJECTNAME As String      'nom du projet :)
     Public exeVB_FORMS() As CONTROL_FORM
     Private exeVB_CTRL_PRP() As CONTROL_PROPERTY
@@ -271,21 +285,23 @@ End Type
 Type APIDECLARE
     sName As String     'nom de l'api
     sDll As String      'nom de la DLL origine
-    sFrom As String     'nom de la feuille dans laquel l'API est déclaré (en debug)
+    lFrom As Long       'index de la feuille dans laquel l'API est déclaré (en debug)
     RvaOffset As Long   'offset où l'api est déclaré dans l'exe
+    RvaCall As Long     'offset demandant l'appel à cet API par le code compilé
 End Type
-    Private exeVB_API() As APIDECLARE
+    Public exeVB_API() As APIDECLARE
 
 
 
 'déclaration pour un morceau de fonction compilé (en dev)
-Private exeVB_CODEENTRY As Long 'pointeur vers le début des fonctions compilées
-Private exeVB_CODELEN As Long   'longueur de l'ensemble des fonctions compilées
+Public exeVB_CODEENTRY As Long 'pointeur vers le début des fonctions compilées
+Public exeVB_CODELEN As Long   'longueur de l'ensemble des fonctions compilées
 Public exeVB_CODEMAIN As Long  'point d'entrée vers la fonction appelé au démarrage (Sub Main)
 'Table de strucutre de feuille (modules, forms...) tel qu'elle est enregistré physiquement
 'dans l'exe compilé vb6. Les informations associés à la variables sont "ce qui semble être" et non pas "sûre"
 Private Type VBTBLSTRUCT
-    Fill1 As Long   'toujours &hffffffff
+    rvaS As Long    'pointeur vers définition des subs de la feuille
+    fill1 As Long   'toujours &hffffffff
     rva2 As Long
     rva3 As Long
     rva4 As Long
@@ -296,26 +312,67 @@ Private Type VBTBLSTRUCT
     num2 As Long
     mType As Long   'type de feuille (modules, forms, classes)
     eot1 As Long
-    rva1 As Long    'pointeur d'association
+    'rva1 As Long    'pointeur d'association
+End Type
+Private Type VBPAGESTRUCT
+    Starts As Long
+    rva1 As Long
+    null1 As Long
+    rva2 As Long
+    fill1 As Long
+    null2 As Long
+    rva3 As Long
+    rva4 As Long
+    null3 As Long
+    value1 As Long
+    null4 As Long
+    null5 As Long
+    null6 As Long
+    rva5 As Long
+    vone1 As Long
+    rva6 As Long
+    null7 As Long
+    rva7 As Long
+    vone2 As Long
+    rva8 As Long
+    null8 As Long
+    rva9 As Long
+    vthree As Long
+    rva10 As Long
+    numsub As Integer
+    const1 As Integer
+    const2 As Integer
+    const3 As Integer
+    subjmp As Long
 End Type
     'type pour vbanalyse
     Type VBMODULE
-        sName As String
-        lType As Long
-        RvaOffset As Long
-        FullLen As Long
-        NumSub As Long
+        sName As String    'nom
+        lType As Long      'type de feuille
+        RvaOffset As Long  'rva debut structure dans fichier
+        FullLen As Long    'longueur de la structure
+        numsub As Long     'nombre de sub
+        frmidx As Long     'index vers la table des forms/userctl si le module est un frm/uctl
     End Type
     Type VBSUB  'description d'un sub() utilisateur (programmé par)
         sName As String     'si possible
         sParams As String   'si possible
         rvaCode As Long     'point d'entrée dans le code compilé
-        CodeLen As Long     'longueur du code compilé (jusqu'a une instruction RET)
+        codelen As Long     'longueur du code compilé (jusqu'a une instruction RET)
+        rvaEnd  As Long     'rva de fin du code
         SubType As Long     'type de sub
         SubFrom As Long     'origine du sub (feuille dans laquelle il est codé...)
+        ObjFrom As Long     'objet d'origine du sub (s'il y a lieu)
     End Type
-        Private exeVB_MODULES() As VBMODULE
-        Private exeVB_SUBS() As VBSUB
+    Type VBEP  '"entry points" dans le code compilé
+        oriSub As Long    'index du sub appelant
+        oriCode As Long   'code du pattern
+        oriRva As Long    'position du pattern
+        rvaJmp As Long    'cible dans le code compilé
+    End Type
+        Public exeVB_MODULES() As VBMODULE
+        Public exeVB_SUBS() As VBSUB
+        Public exeVB_EP() As VBEP
 
 
 
@@ -336,26 +393,35 @@ End Type
 
 'analyse des API VB6 importé
 Type API_VBDEF
-    Rva As Long
+    rva As Long
     Ordinal As Long
     uName As String
     uDescr As String
 End Type
-Private exeVB6_APIDEF() As API_VBDEF
+Public exeVB6_APIDEF() As API_VBDEF
 
+Public exeVB_Prop() As String 'liste des propriétés d'objets VB
 
 
 'l'api qui sauve la vie :)
 Private Declare Sub MemCpy Lib "Kernel32.dll" Alias "RtlMoveMemory" (Dest As Any, From As Any, ByVal Length As Long)
 
 Private exePEHEAD As PE_HEADER
-Private exeOPHEAD As OPTIONAL_HEADER
+Public exeOPHEAD As OPTIONAL_HEADER
 Private exeHEADIR As HEAD_DIRECTORIES
 Private exeOTABLE() As OBJECT_TABLE
 Public exeISVB As Boolean
 Public exeISPACKED As Boolean
 
+Public exeVB_VBEP As Long 'point d'entrée des données VB
+
 Public exeFILENAMElong As String  'nom du dernier fichier étudié
+Public exeFILENAMEsize As Long    'taille du fichier
+Public exeFILENAMEdir As String
+
+'=================================================================
+'=================================================================
+'=================================================================
 
 Sub OpenEXE_PK(ByVal FFname As String)
 'cette fonction alternative essaye de récupérer des informations VB6 dans les exe dépacké manuellement.
@@ -376,6 +442,7 @@ Dim bArray() As Byte
     
     exeFILENAMElong = FFname
     Open FFname For Binary Access Read As #fp
+        exeFILENAMEsize = LOF(fp)
         Get #fp, 61, pefp   'offset du début PE
         Get #fp, pefp + 1, bArray() 'récupère les octets
         'copie les octets dans les structures
@@ -390,6 +457,7 @@ Dim bArray() As Byte
             'recherche "VB5!"
             Get #fp, i, vb5
             If vb5 = 557138518 Then
+                exeVB_VBEP = i - 1
                 'recherche l'entrypoint qui a appelé "VB5!"
                 n = i - 1 + exeOPHEAD.ImageBase
                 For j = i To 2048 Step -1
@@ -401,6 +469,7 @@ Dim bArray() As Byte
                             exeISVB = True
                             Call FindControl(fp, j - 2)
                             Call FindModules(fp, j - 2)
+                            Call AssocieSubObj
                             GoTo WasVB
                         End If
                     End If
@@ -415,11 +484,20 @@ Dim bArray() As Byte
 
 WasVB:
     'servira...
-    ParseVBFunc (fp)
-    
-    Close #fp
-    
+
 End Sub
+
+Function IsExe(FFname As String) As Boolean
+'détermine si c'est un .exe ou non en cherchant "MZ".
+Dim eHead As Integer
+
+    Open FFname For Binary Access Read As #10
+        Get #10, 1, eHead
+    Close #10
+    
+    IsExe = (eHead = 23117)
+
+End Function
 
 Sub OpenEXE(ByVal FFname As String)
 'attention, ca ne vérifie pas si l'exe est valide (bonjour l'erreur en cas de forcing :op )
@@ -439,6 +517,7 @@ Dim bArray() As Byte
     
     exeFILENAMElong = FFname
     Open FFname For Binary Access Read As #fp
+        exeFILENAMEsize = LOF(fp)
         Get #fp, 61, pefp   'offset du début PE
         Get #fp, pefp + 1, bArray() 'récupère les octets
         'copie les octets dans les structures
@@ -489,6 +568,9 @@ Dim bArray() As Byte
                 'boucle jusqu'a la dernière dll de la liste import
             Loop
         End If
+        
+        'exporation (dll/API externe)
+        ' non utilisé par les programmes VB / pas d'équivalent dans les formats PEs
 
 
         'ressources
@@ -506,6 +588,8 @@ Dim bArray() As Byte
 
         'vb seulement :
         If CheckVBexe(fp, exeOPHEAD.EntryPointRVA) Then
+            Get #fp, exeOPHEAD.EntryPointRVA + 2, exeVB_VBEP
+            
             'objets, contrôles
             Call FindControl(fp, exeOPHEAD.EntryPointRVA)
             'copyright
@@ -514,8 +598,11 @@ Dim bArray() As Byte
             'module
             Call FindModules(fp, exeOPHEAD.EntryPointRVA)
             
-            'table de sub
-            Call ParseVBFunc(fp)
+            'table de points d'entrés (anciennement cru : sub)
+            Call ParseVBEP(fp)
+            
+            'associe les subs trouvés aux objets/modules
+            Call AssocieSubObj
             
         End If
         
@@ -526,85 +613,89 @@ Dim bArray() As Byte
     
 End Sub
 
-Sub ParseCopyright(FilePointer As Integer, ByVal EP As Long, ByVal MaxLen As Long)
+Sub ParseCopyright(FilePointer As Integer, ByVal ep As Long, ByVal MaxLen As Long)
 'je vous ai dit que c'est en dev !
 Dim i, j, k
 Dim Tstr As String
 Dim iArray(1 To 50) As Integer
 
-    EP = EP + 6
-    Tstr = ScanUnicode(FilePointer, EP)
+    ep = ep + 6
+    Tstr = ScanUnicode(FilePointer, ep)
     If Tstr = "VS_VERSION_INFO" Then
-        EP = EP + 92
-        Tstr = ScanUnicode(FilePointer, EP)
+        ep = ep + 92
+        Tstr = ScanUnicode(FilePointer, ep)
         If Tstr = "VarFileInfo" Then
-            EP = EP + 128: j = 10
+            ep = ep + 128: j = 10
             For i = 1 To 9
-            Tstr = ScanUnicode(FilePointer, EP)
+            Tstr = ScanUnicode(FilePointer, ep)
             Select Case Tstr
             Case "CompanyName"
-                EP = EP + Len(Tstr) * 2 + 4
-                Tstr = ScanUnicode(FilePointer, EP)
+                ep = ep + Len(Tstr) * 2 + 4
+                Tstr = ScanUnicode(FilePointer, ep)
                 exeVB_COPYRIGHT.CompanyName = Tstr
             Case "FileDescription"
-                EP = EP + Len(Tstr) * 2 + 4
-                Tstr = ScanUnicode(FilePointer, EP)
+                ep = ep + Len(Tstr) * 2 + 4
+                Tstr = ScanUnicode(FilePointer, ep)
                 exeVB_COPYRIGHT.FileDescription = Tstr
             Case "LegalCopyright"
-                EP = EP + Len(Tstr) * 2 + 2
-                Tstr = ScanUnicode(FilePointer, EP)
+                ep = ep + Len(Tstr) * 2 + 2
+                Tstr = ScanUnicode(FilePointer, ep)
                 exeVB_COPYRIGHT.LegalCopyright = Tstr
             Case "LegalTrademarks"
-                EP = EP + Len(Tstr) * 2 + 4
-                Tstr = ScanUnicode(FilePointer, EP)
+                ep = ep + Len(Tstr) * 2 + 4
+                Tstr = ScanUnicode(FilePointer, ep)
                 exeVB_COPYRIGHT.LegalTrademarks = Tstr
                 j = 8
             Case "ProductName"
-                EP = EP + Len(Tstr) * 2 + 4
-                Tstr = ScanUnicode(FilePointer, EP)
+                ep = ep + Len(Tstr) * 2 + 4
+                Tstr = ScanUnicode(FilePointer, ep)
                 exeVB_COPYRIGHT.ProductName = Tstr
                 j = 10
             Case "FileVersion"
-                EP = EP + Len(Tstr) * 2 + 4
-                Tstr = ScanUnicode(FilePointer, EP)
+                ep = ep + Len(Tstr) * 2 + 4
+                Tstr = ScanUnicode(FilePointer, ep)
                 exeVB_COPYRIGHT.FileVersion = Tstr
             Case "ProductVersion"
-                EP = EP + Len(Tstr) * 2 + 2
-                Tstr = ScanUnicode(FilePointer, EP)
+                ep = ep + Len(Tstr) * 2 + 2
+                Tstr = ScanUnicode(FilePointer, ep)
                 exeVB_COPYRIGHT.ProductVersion = Tstr
             Case "InternalName"
-                EP = EP + Len(Tstr) * 2 + 2
-                Tstr = ScanUnicode(FilePointer, EP)
+                ep = ep + Len(Tstr) * 2 + 2
+                Tstr = ScanUnicode(FilePointer, ep)
                 exeVB_COPYRIGHT.InternalName = Tstr
                 j = 8
             Case "OriginalFilename"
-                EP = EP + Len(Tstr) * 2 + 2
-                Tstr = ScanUnicode(FilePointer, EP)
+                ep = ep + Len(Tstr) * 2 + 2
+                Tstr = ScanUnicode(FilePointer, ep)
                 exeVB_COPYRIGHT.OriginalFilename = Tstr
             End Select
-            EP = EP + Len(Tstr) * 2 + j
+            ep = ep + Len(Tstr) * 2 + j
             Next i
         End If
     End If
 
 End Sub
-Private Function ScanUnicode(fp As Integer, ByVal Offset As Long) As String
+Function ScanUnicode(fp As Integer, ByVal offset As Long, Optional EOS As Long = 32767) As String
 'renvoi la chaine commençant à l'offset Ofs lorsque elle est de type unicode dans le fichier
 Dim B1 As Byte, B2 As Byte, i As Long
 i = 1
 
-    Get #fp, Offset, B1
-    Get #fp, Offset + 1, B2
+    Get #fp, offset, B1
+    Get #fp, offset + 1, B2
     
-    Do
+    Do Until ((CLng(B1) + CLng(B2)) = 0) Or (i > EOS)
         ScanUnicode = ScanUnicode & " "
         MidB$(ScanUnicode, i, 1) = Chr$(B1)
         MidB$(ScanUnicode, i + 1, 1) = Chr$(B2)
         i = i + 2
-        Offset = Offset + 2
-        Get #fp, Offset, B1
-        Get #fp, Offset + 1, B2
-    Loop Until (B1 + B2) = 0
+        offset = offset + 2
+        Get #fp, offset, B1
+        Get #fp, offset + 1, B2
+        If (CLng(B1) + CLng(B2)) > 255 Then
+            ScanUnicode = ""
+            Exit Function
+        End If
+    Loop
 
 End Function
 
@@ -630,9 +721,12 @@ Sub FindModules(FilePointer As Integer, ByVal ProgEntryPoint As Long)
 Dim PtrStr, PtrTbl, PtrBas, PtrSubMain
 Dim TBLdeb, ASMdeb, ASMend
 Dim i, j, k, l, m
+Dim bPad As Byte
 Dim TblLst(1 To 4) As Long
 Dim TblDef(1 To 22) As Long
 Dim TblStruct() As VBTBLSTRUCT
+Erase exeVB_SUBS
+ReDim exeVB_SUBS(0)
 
     'récupère le pointeur vers "VB5!"
     Get #FilePointer, ProgEntryPoint + 2, PtrStr
@@ -643,9 +737,15 @@ Dim TblStruct() As VBTBLSTRUCT
     
     'récupère le pointeur vers le sub Main() (départ d'exécution) s'il existe (sinon = 0)
     Get #FilePointer, PtrTbl - 4, PtrSubMain
-    If PtrSubMain > 0 Then
+    If PtrSubMain > exeOPHEAD.ImageBase Then
+        'Sub Main()
         PtrSubMain = PtrSubMain - exeOPHEAD.ImageBase
         exeVB_CODEMAIN = PtrSubMain
+        ReDim exeVB_SUBS(0 To 1)
+        exeVB_SUBS(1).sName = "Main"
+        exeVB_SUBS(1).SubType = 1
+        exeVB_SUBS(1).rvaCode = exeVB_CODEMAIN
+        exeVB_SUBS(1).SubFrom = 0
     Else
         exeVB_CODEMAIN = 0
     End If
@@ -657,8 +757,15 @@ Dim TblStruct() As VBTBLSTRUCT
     TBLdeb = TblLst(1) - exeOPHEAD.ImageBase    'tables de structure
     ASMdeb = TblLst(3) - exeOPHEAD.ImageBase    'début du code ASM compilé
     ASMend = TblLst(4) - exeOPHEAD.ImageBase    'fin du code ASM compilé
-    exeVB_CODEENTRY = ASMdeb
-    exeVB_CODELEN = ASMend - ASMdeb
+    'le début du code compilé est décalé avec E9h comme padding, le vrai début est après E9h
+    'la fin du code compilé est marqué avec 9Eh. Idem, il s'agit d'un padding a supprimer.
+    i = ASMdeb: bPad = &HE9
+    Do While bPad = &HE9
+        i = i + 1
+        Get #FilePointer, i, bPad
+    Loop
+    exeVB_CODEENTRY = i - 1
+    exeVB_CODELEN = ASMend - i
     
     'récupération des tables de structure
     Get #FilePointer, TBLdeb + 1, TblDef()
@@ -666,34 +773,44 @@ Dim TblStruct() As VBTBLSTRUCT
     k = (TblDef(12) And &HFFFF0000) / 65536
     ReDim TblStruct(1 To k)
     ReDim exeVB_MODULES(1 To k): i = 1
-    Get #FilePointer, TblDef(13) - exeOPHEAD.ImageBase + 5, TblStruct()
-    
+    Get #FilePointer, TblDef(13) - exeOPHEAD.ImageBase + 1, TblStruct()
     'initialise le tableau local s'il y a des API
     ReDim exeVB_API(0)
-    
-    'antibug... mouais
-    PtrBas = TblDef(22) - exeOPHEAD.ImageBase + 1
-    exeVB_MODULES(1).sName = ScanString(FilePointer, TblStruct(1).rva6 - exeOPHEAD.ImageBase + 1)
-    GoSub ScanTab   'certaines API sont appelé ici
     
     'récupère les informations sur les feuilles dans l'exe
     For i = 1 To k
         exeVB_MODULES(i).lType = TblStruct(i).mType
+        exeVB_MODULES(i).numsub = TblStruct(i).nSubs 'pas forcément précis => voir ParseVBSubs()
         exeVB_MODULES(i).sName = ScanString(FilePointer, TblStruct(i).rva6 - exeOPHEAD.ImageBase + 1)
-        exeVB_MODULES(i).RvaOffset = TblDef(22) - exeOPHEAD.ImageBase + ((i - 1) * 48)
-        exeVB_MODULES(i).NumSub = TblStruct(i).nSubs
+        exeVB_MODULES(i).RvaOffset = TblStruct(i).rvaS - exeOPHEAD.ImageBase 'TblDef(22) - exeOPHEAD.ImageBase + ((i - 1) * 48)
+        'Debug.Print Hex$(exeVB_MODULES(i).RvaOffset)
+        'IMPORTANT : ce RVA est le point d'entré vers des tables et RVA...
+        '...qui contiennent API ainsi que point d'entrée des SUBS dans le code !!
+        If exeVB_MODULES(i).lType <> 98305 Then 'si le type est un module .bas, il n'y a pas de table.
+            ParseVBSubs FilePointer, i, exeVB_MODULES(i).RvaOffset, exeVB_MODULES(i).numsub
+        End If
+        'Attention : seul les subs des évènements objets sont listés.
+        'Les subs indépendants ne peuvent être trouvés qu'en analysant le code compilé désassemblé
+        'un sub commence toujours par : 55 8B EC 6A/83
+        ' 55    = push ebp
+        ' 8B EC = mov ebp, esp
+        ' 83 () = sub esp, (byte) ==> dans le cas d'un sub objet
+        ' 6A () = push (byte) ==> dans le cas d'un sub indépendant
         
-        If TblStruct(i).rva1 <= exeOPHEAD.ImageBase Then Exit For 'mouais
-        PtrBas = TblStruct(i).rva1 - exeOPHEAD.ImageBase + 1
+        'If TblStruct(i).rva1 <= exeOPHEAD.ImageBase Then Exit For 'mouais
+        PtrBas = TblStruct(i).rvaS - exeOPHEAD.ImageBase + 1
         
         GoSub ScanTab
         
     Next i
     
+    Call ParseCode(FilePointer)
+    
     Exit Sub
 
     
 ScanTab:
+    'recherche de déclarations d'API via declare sub
     Get #FilePointer, PtrBas, m
     Get #FilePointer, PtrBas - 8, l
     Get #FilePointer, PtrBas - 4, j
@@ -710,7 +827,7 @@ ScanTab:
                 '???
             Case 7
                 'déclaration d'API
-                Call ParseDeclares(FilePointer, PtrTbl - exeOPHEAD.ImageBase + 1, exeVB_MODULES(i).sName)
+                Call ParseDeclares(FilePointer, PtrTbl - exeOPHEAD.ImageBase + 1, i)
             Case Else
                 Exit Do
         End Select
@@ -720,7 +837,7 @@ Return
 
 End Sub
 
-Sub ParseDeclares(fp As Integer, ByVal DeclareEntryPoint As Long, ByVal sFormOrigine As String)
+Sub ParseDeclares(fp As Integer, ByVal DeclareEntryPoint As Long, ByVal FormOrigin As Long)
 'récupère les API déclaré sous VB et les classe par ordre de dll d'origine
 Dim Tapi As APISTRUCT
 Dim i, j, k
@@ -729,10 +846,11 @@ Dim i, j, k
     j = UBound(exeVB_API()) + 1
 
     ReDim Preserve exeVB_API(j)
-    exeVB_API(j).RvaOffset = DeclareEntryPoint
+    exeVB_API(j).RvaOffset = DeclareEntryPoint - 1
     exeVB_API(j).sName = ScanString(fp, Tapi.sAPI - exeOPHEAD.ImageBase + 1)
     exeVB_API(j).sDll = ScanString(fp, Tapi.sDll - exeOPHEAD.ImageBase + 1)
-    exeVB_API(j).sFrom = sFormOrigine
+    exeVB_API(j).lFrom = FormOrigin
+    exeVB_API(j).RvaCall = DeclareEntryPoint - 1 + 24
     
 '    i = UBound(exeAPI_DLL())
 '    If i = 0 Then
@@ -783,7 +901,7 @@ ReDim exeVB_CONTROL(1 To 1) 'purge
         exeVB_FORMS(i).rvaPtr = j - exeOPHEAD.ImageBase
         PtrForm = PtrForm + 80
     Next i
-
+    
     'décomposition des forms
     ParseControl FilePointer, exeVB_FORMS()
     
@@ -802,6 +920,7 @@ Dim NumCtrl As Long     'nombre de contrôles dans le bloc
 Dim ObjBlock As Long    'taille d'un segment (définition d'1 contrôle)
 Dim NameLen As Integer  'longueur du nom d'un contrôle (sur 2 octets)
 Dim bCol As Byte, bNum As Integer  'collection : identifiant, numéro
+Dim fID As Integer      'compteur d'ordre d'apparition dans le form
 Dim i As Long, j As Long, BlkEnd As Long, k As Long
 Dim BugCheck As Byte '(... ben oui ya des truc que je pige pas encore)
 
@@ -810,7 +929,7 @@ Dim BugCheck As Byte '(... ben oui ya des truc que je pige pas encore)
 
 i = 1
 For j = 1 To UBound(FormsDef())
-    
+    'BOUCLE 1 : form par form
     
     OffsetStart = FormsDef(j).rvaPtr
     FormsDef(j).DefPtr = i
@@ -829,9 +948,13 @@ For j = 1 To UBound(FormsDef())
     OffsetStart = OffsetStart + 4
     
     k = 0 '<<== sert a compter le nb d'objets trouvé (encore en phase de test)
-    Do
-        'If k > NumCtrl Then Exit Do
+    fID = &H2F8
 
+    Do
+        'BOUCLE 2 : objet par objet
+
+        'If k > NumCtrl Then Exit Do
+        
 Cscan:
         Get #FilePointer, OffsetStart, ObjBlock
         
@@ -849,7 +972,7 @@ Cscan:
             'en général, il s'agit un groupe d'objets.
             ObjBlock = (ObjBlock And &H7FFFFFFF)
             ReDim Preserve exeVB_CONTROL(1 To i)
-            exeVB_CONTROL(i).Offset = OffsetStart
+            exeVB_CONTROL(i).offset = OffsetStart
             Get #FilePointer, OffsetStart + 4, bCol
             Get #FilePointer, OffsetStart + 5, bNum
             Get #FilePointer, OffsetStart + 7, NameLen
@@ -861,6 +984,8 @@ Cscan:
                 Else
                     exeVB_CONTROL(i).sType = Get_VBCTRL(exeVB_CONTROL(i).id)
                 End If
+                
+            exeVB_CONTROL(i).frmID = fID + bCol * 4
 
             OffsetStart = OffsetStart + ObjBlock + 1
             i = i + 1: k = k + 1
@@ -871,7 +996,8 @@ Cscan:
         Else
             
             ReDim Preserve exeVB_CONTROL(1 To i)
-            exeVB_CONTROL(i).Offset = OffsetStart
+            exeVB_CONTROL(i).offset = OffsetStart
+            Get #FilePointer, OffsetStart + 4, bCol
             Get #FilePointer, OffsetStart + 5, NameLen
             exeVB_CONTROL(i).sName = ScanString(FilePointer, OffsetStart + 7)
             Get #FilePointer, OffsetStart + 8 + NameLen, exeVB_CONTROL(i).id
@@ -882,7 +1008,8 @@ Cscan:
                     'contrôle vb interne
                     exeVB_CONTROL(i).sType = Get_VBCTRL(exeVB_CONTROL(i).id)
                 End If
-    
+
+            exeVB_CONTROL(i).frmID = fID + bCol * 4
             OffsetStart = OffsetStart + ObjBlock + 1
             i = i + 1: k = k + 1
         End If
@@ -912,7 +1039,7 @@ Dim useStr As String
     
     For i = 1 To l
     
-        Offs = tblVBCTRL(i).Offset
+        Offs = tblVBCTRL(i).offset
         Get #FilePointer, Offs, iSize
         If iSize < -1 Then
             'bit 31 = 1 : collection d'objet
@@ -923,6 +1050,7 @@ Dim useStr As String
             rvaEnd = Offs + iSize
             Offs = Offs + 5
         End If
+        tblVBCTRL(i).LenTr = iSize
         
         
         'saute l'attribut .Name
@@ -1141,22 +1269,21 @@ Dim useStr As String
                 exeVB_CTRL_PRP(i).pHeight = gpLng
                 
             Case 19 'VB.Menu
-                'tweak de Urgo (vbfrance)
                 Get #FilePointer, Offs, gpInt
-                If gpInt = 768 Then
-                   exeVB_CTRL_PRP(i).sCaption = ScanString(FilePointer, Offs + 4)
-                Else
-                   exeVB_CTRL_PRP(i).sCaption = ScanString(FilePointer, Offs + 2)
-                End If
-                '/tweak
+                'Menu invisible : astuce de urgo (VBFrance : auteur 19905)
+                    If gpInt = 768 Then
+                       exeVB_CTRL_PRP(i).sCaption = ScanString(FilePointer, Offs + 4)
+                    Else
+                       exeVB_CTRL_PRP(i).sCaption = ScanString(FilePointer, Offs + 2)
+                    End If
+                    'code original
+                    'exeVB_CTRL_PRP(i).sCaption = ScanString(FilePointer, Offs + 2)
                 
                 Offs = rvaEnd - 3
                 'Offs = Offs + gpInt + 3
                 Get #FilePointer, Offs, gpInt
                 exeVB_CTRL_PRP(i).pRank = gpInt
-
-
-
+            
             Case 20 'VB.MDIForm
                 Get #FilePointer, Offs, gpInt
                 exeVB_CTRL_PRP(i).sCaption = ScanString(FilePointer, Offs + 2)
@@ -1265,77 +1392,344 @@ Dim i As Long, j As Long
     
 End Sub
 
-Private Sub ParseVBFunc(fp As Integer)
-'recherche les points d'entrée dans le code compilé pour les différents sub -expérimental-
-Dim i, j, cn, sBe
+Private Sub ParseVBSubs(ByVal fp As Integer, ByVal ModuleFrom As Long, ByVal RvaOffs As Long, ByRef nSubs As Long)
+Dim i, j, k, p, r, v
+Dim sAsm As String, bAsm(1 To 10) As Byte, iAsm As Integer
+Dim TblPage As VBPAGESTRUCT
+    
+    Get #fp, RvaOffs + 1, TblPage
+    If (TblPage.Starts And &HFFFF&) <> 1 Then Exit Sub
+    
+    'nombre de pointeur de subs = TblPage.numsub
+    'rva vers les pointeurs = TblPage.subjmp
+    r = TblPage.subjmp - exeOPHEAD.ImageBase + 1
+    
+    j = UBound(exeVB_SUBS)
+    'ReDim Preserve exeVB_SUBS(0 To j + TblPage.numsub)
+    nSubs = TblPage.numsub
+    
+    For i = 0 To TblPage.numsub - 1
+    j = j + 1
+        Get #fp, r + i * 4, p
+        'p pointe vers le code asm référant objet est jmp vers le code asm du sub
+        Get #fp, p - exeOPHEAD.ImageBase + 1 - 8, bAsm()
+        'fix : le pointeur n'indique pas toujours un déclarateur de sub (sub + jmp)
+        If bAsm(1) = 129 Then
+            ReDim Preserve exeVB_SUBS(0 To j)
+            sAsm = unASM.CodeToStr(bAsm(), unASM.GetVASM(TblPtrASM(bAsm(1)), bAsm(1)), p, k, v)
+            exeVB_SUBS(j).SubFrom = ModuleFrom
+            exeVB_SUBS(j).SubType = Val("&h" & Right$(sAsm, 8))
+            Get #fp, p - exeOPHEAD.ImageBase + 1, bAsm()
+            sAsm = unASM.CodeToStr(bAsm(), unASM.GetVASM(TblPtrASM(bAsm(1)), bAsm(1)), p, k, v)
+            'exeVB_SUBS(j).rvaCode = Val("&h" & Right$(sAsm, 8)) - exeOPHEAD.ImageBase
+            exeVB_SUBS(j).rvaCode = v - exeOPHEAD.ImageBase
+        Else
+            'mauvais pointage du sub / sub faux / bug
+            j = j - 1
+        End If
+    Next i
+
+End Sub
+
+Private Sub ParseVBEP(fp As Integer)
+'recherche les points d'entrée dans le code compilé
+'+ analyse la table des saut absolu (jmp FF25h) pointant vers les API vb importés
+Dim i, j, k, cn, ce, sBe, rvao, ct
 Dim t1, t2, t3, t4
+Dim lj As Integer
 t1 = 1
 
     i = 0
-    ReDim exeVB_SUBS(1)
-    cn = UBound(exeIMPORT_APINAME())    'pointeur fin des import d'api
-    cn = 4096 + (4 * cn) + 1
+    ReDim exeVB_EP(1)
+    ce = UBound(exeIMPORT_APINAME())    'pointeur fin des import d'api = début du tableau des points d'entrées
+    cn = 4096 + (4 * ce) + 1
     
+    'ETAPE 1
+    'analyse de la table des points d'entrés dans le code compilé (faussement appelé "table des subs" antérieurement
+    ct = 0
     Do
 DebLoop:
         cn = cn + 4
         Get #fp, cn, j
-        If (j And &H25FF&) = &H25FF& Then Exit Do   'fin de la liste (repéré par un 25ffh ...)
+        rvao = cn - 1
+        If (j And &H25FF&) = &H25FF& Then 'fin de la liste (repéré par un 25ffh ...)
+            Get #fp, cn + 2, t1
+            If (t1 - exeOPHEAD.ImageBase) < cn And (t1 - exeOPHEAD.ImageBase) > 0 Then Exit Do
+        End If
+        ct = ct + 1
         
-        'récupère la liste. Bon ya plein de truc bizarre, dur dur de distingué si c'est un sub ou une func
-        If j > 0 Then
-            
-            If (j And &HFF000000) > 0 Then
-                t1 = j And &HFF000000
-                
-            ElseIf (j And &HFF0000) > 0 Then
-                t2 = j And &HFF0000
-                If t2 = &H80000 Then
-                    If ((j And 65535) = 7) Or ((j And 65535) = 12) Then
-                        cn = cn + 12
-                    Else
-                        cn = cn + 4
-                    End If
-                    Get #fp, cn, t4
+        'récupère la liste.
+        'pattern 1 : 0x 00 08 00 (avec x impair) définition de Sub Object, avec x l'identifieur
+        ' ===> groupement de 3 rva ou 00
+        'pattern 2 : 0x 00 04 00 (avec x pair)
+        ' ===> groupement de 3 00 ou rva
+        'pattern 3 : xx 00 14 00
+        ' ===> gorupement de 5 rva ou 00, suivi de pattern 4
+        'pattern 4 : nn 00 00 00 (nn)
+        ' ===> rva (long) répèté nn fois.
+        'pattern 5 : 00 00 xx 4x
+        ' ===> marque une autre section (autre feuille ?)
+        'pattern 6 : xx 00 08 00 (rare, xx = 85)
+        ' ===> 1 rva, 00, 1 rva
+        '
+        'pattern autres possible : xx xx 0F F3, xx xx CF F3, xx xx 3F F3, ...
+        
+        'détecteur de pattern 1 à 3
+        t1 = (j And &H1F00FF)
+        t2 = (j And &HFF)
+        If (j > 0) And (t1 = j) And ((t1 - t2) > 0) Then 'evite 00h AND confirme pattern 1/2/3 AND evite pattern 4
+            If (j And &H80001) = t1 Then
+                'pattern 1 avec 1 seule entrée
+                Get #fp, cn + 4, t4
+                If t4 > 0 Then
                     GoSub AddNSub
-                    exeVB_SUBS(i).SubType = 1
-                    exeVB_SUBS(i).SubFrom = 1
-                ElseIf t2 = &H40000 Then
-                    If (j And 65535) = 4 Then
-                        cn = cn + 12
-                    Else
-                        cn = cn + 8
-                    End If
-                    Get #fp, cn, t4
-                    GoSub AddNSub
-                    exeVB_SUBS(i).SubType = 1
-                    exeVB_SUBS(i).SubFrom = 2
                 End If
-                'If t4 = 0 Then Stop
+                cn = cn + 4
+            ElseIf ((j And &H8000F) = t1) Or ((j And &H4000F) = t1) Then
+                'pattern 1 ou pattern 2
+                Get #fp, cn + 4, t4
+                If t4 > 0 Then
+                    GoSub AddNSub
+                End If
+                Get #fp, cn + 8, t4
+                If t4 > 0 Then
+                    GoSub AddNSub
+                End If
+                Get #fp, cn + 12, t4
+                If t4 > 0 Then
+                    GoSub AddNSub
+                End If
+                cn = cn + 12
+                
+            ElseIf (j And &H1400FF) = t1 Then
+                'pattern 3
+                Get #fp, cn + 4, t4
+                If t4 > 0 Then
+                    GoSub AddNSub
+                End If
+                Get #fp, cn + 8, t4
+                If t4 > 0 Then
+                    GoSub AddNSub
+                End If
+                Get #fp, cn + 12, t4
+                If t4 > 0 Then
+                    GoSub AddNSub
+                End If
+                Get #fp, cn + 16, t4
+                If t4 > 0 Then
+                    GoSub AddNSub
+                End If
+                Get #fp, cn + 20, t4
+                If t4 > 0 Then
+                    GoSub AddNSub
+                End If
+                
+                cn = cn + 20
+                Get #fp, cn + 4, t2
+                For k = 1 To t2
+                    Get #fp, cn + 4 + (4 * k), t4
+                    GoSub AddNSub
+                Next k
+                cn = cn + 4 + (4 * t2)
+            
+            ElseIf t2 = 133 Then
+            'pattern 6
+                Get #fp, cn + 4, t4
+                If t4 > 0 Then
+                    GoSub AddNSub
+                End If
+                Get #fp, cn + 12, t4
+                If t4 > 0 Then
+                    GoSub AddNSub
+                End If
+                cn = cn + 12
+          
+            Else
+                'nouveau pattern ???
+                't2 = Val(Hex(j))
+                'Stop
             End If
         End If
-        
+    
+    
     Loop
+    
+    
+    'ETAPE 2
+    'analyse des JMP DWORD PTR vers les APIs (FF 25 [long])
+    
+    'cn = 4096 + (4 * ce) + 1
+    cn = cn - 2
+    Do
+        cn = cn + 2
+        Get #fp, cn, lj
+    Loop Until lj = &H25FF
+    'les FF25& sont les JMP vers l'appel d'une fonction de la DLL VB.
+    t3 = UBound(exeIMPORT_APINAME())
+    i = 0
+    Do
+        Get #fp, cn, lj
+        If lj = &H25FF Then 'jmp dword ptr ...
+            Get #fp, cn + 2, j
+            'jmp dword ptr [j]
+            Get #fp, (j - exeOPHEAD.ImageBase) + 1, t1  'fait le jmp et recup l'addresse de l'api appelée.
+            
+            i = i + 1
+            ReDim Preserve exeVB6_APICALLS(1 To i) As VB_APICALLS
+            'cherche le nom de l'api correspondant.
+            For t2 = 1 To t3
+                If t1 = exeIMPORT_APINAME(t2).Address Then
+                    exeVB6_APICALLS(i).ApiVbDefPtr = t2
+                    exeVB6_APICALLS(i).rva = cn - 1
+                    Exit For
+                End If
+            Next t2
+            
+        Else
+            Exit Do
+        End If
+        
+        cn = cn + 6
+    Loop
+    
+    
     
 Exit Sub
 
 AddNSub:
     i = i + 1
-    ReDim Preserve exeVB_SUBS(i)
-    exeVB_SUBS(i).rvaCode = t4 - exeOPHEAD.ImageBase
+    ReDim Preserve exeVB_EP(i)
+    exeVB_EP(i).rvaJmp = t4 '- exeOPHEAD.ImageBase
+    exeVB_EP(i).oriCode = j
+    exeVB_EP(i).oriRva = rvao + exeOPHEAD.ImageBase
+    exeVB_EP(i).oriSub = ct
+    
 Return
     
 End Sub
 
-Private Function ScanString(fp As Integer, ByVal Offset As Long) As String
+Private Sub ParseCode(ByVal fp As Integer)
+'réalise une analyse primaire du code compilé
+Dim i, j, lvbs, va
+Dim aByte() As Byte
+ReDim aByte(PEexe.exeVB_CODELEN)
+lvbs = UBound(PEexe.exeVB_SUBS())
+
+    Get #fp, PEexe.exeVB_CODEENTRY + 1, aByte()
+    
+
+    For i = 1 To PEexe.exeVB_CODELEN
+        If aByte(i) <> &H55 Then 'recherche des subs non listé dans les tables de structures VB
+        Else
+            If i < (PEexe.exeVB_CODELEN - 8) Then
+                If aByte(i + 1) = &H8B And aByte(i + 2) = &HEC Then
+                    va = PEexe.exeVB_CODEENTRY + i
+                    For j = 1 To lvbs
+                        If exeVB_SUBS(j).rvaCode = va Then GoTo Known
+                    Next j
+                    'nouveau sub trouvé
+                    lvbs = lvbs + 1
+                    ReDim Preserve exeVB_SUBS(lvbs)
+                    exeVB_SUBS(lvbs).rvaCode = va
+                    exeVB_SUBS(lvbs).SubType = -10
+                    exeVB_SUBS(lvbs).SubFrom = -1
+                    exeVB_SUBS(lvbs).ObjFrom = -1
+                    
+                End If
+            End If
+        End If
+Known:
+    Next i
+                        
+
+End Sub
+
+Private Sub AssocieSubObj()
+'associe les subs trouvés aux objets/controles trouvés
+Dim i, j, k
+Dim v, w
+
+'exeVB_SUBS()
+'PEexe.exeVB_CONTROL()
+'PEexe.exeVB_MODULES()
+
+
+    'mise en relation entre les FORMS et MODULE_FORM NAME (rafistolage ...)
+    v = UBound(exeVB_FORMS())
+    w = UBound(exeVB_MODULES())
+    For i = 1 To w
+        For j = 1 To v
+            If exeVB_MODULES(i).sName = exeVB_CONTROL(exeVB_FORMS(j).DefPtr).sName Then Exit For
+        Next j
+        If j <= v Then
+            exeVB_FORMS(j).sName = exeVB_MODULES(i).sName
+            exeVB_MODULES(i).frmidx = j
+        End If
+    Next i
+
+    'EN DEV !! buggé à mort
+    For i = 1 To UBound(exeVB_SUBS())
+    
+        'retrouve l'index dans la liste des objets a partir du nom du form
+        If exeVB_SUBS(i).SubFrom <= 0 Then Exit For
+        For j = 1 To UBound(exeVB_FORMS())
+            If exeVB_MODULES(exeVB_SUBS(i).SubFrom).sName = exeVB_CONTROL(exeVB_FORMS(j).DefPtr).sName Then Exit For
+        Next j
+        If j > UBound(exeVB_FORMS()) Then Exit For
+        
+        'principe : SubType contient soit un 00000033, 00000037 soit un FFFFFFFF
+        'si v = FFFF, alors le sub est indépendant d'un objet, mais contenu dans le form
+        'si v = 33h ou 37h, alors on soustrait 32h ce qui laisse 1 et 4 : c'est l'index relatif de l'objet associé
+        'pour faire la correspondance entre l'index relatif et la liste d'objet trouvé par ParseControl(), on divise par 4
+        v = exeVB_SUBS(i).SubType
+        If v = &HFFFFFFFF Then
+            exeVB_SUBS(i).ObjFrom = 0
+        Else
+            'EN DEBUG
+            'v = (v - 51) / 4
+            'If v = 0 Then
+            '    exeVB_SUBS(i).ObjFrom = exeVB_FORMS(j).DefPtr
+            'Else
+            '    exeVB_SUBS(i).ObjFrom = exeVB_FORMS(j).DefPtr + v ' exeVB_FORMS(j).DefLen - v
+            'End If
+            
+            'exeVB_SUBS(i).ObjFrom = -1
+            'w = v + &H2F8 - (&H33 + &H2F8) - (&H33 + 4 * (exeVB_FORMS(j).DefLen - 1))
+            'w = (Abs(w) + 709)
+            
+            'exeVB_SUBS(i).ObjFrom = v + exeVB_FORMS(j).DefLen - 1
+            For k = exeVB_FORMS(j).DefPtr To exeVB_FORMS(j).DefPtr + exeVB_FORMS(j).DefLen - 1
+                If (exeVB_CONTROL(k).frmID - 709) = v Then
+                    exeVB_SUBS(i).ObjFrom = k
+                End If
+            Next k
+        End If
+    Next i
+    
+    'Associe les modules de classes, crée des controles virtuelles correspondant au sub
+    'v = UBound(exeVB_FORMS())
+    'For i = 1 To UBound(exeVB_MODULES())
+    '    If exeVB_MODULES(i).lType = 1146883 Then
+    '        v = v + 1
+    '        ReDim Preserve exeVB_FORMS(1 To v)
+    '        exeVB_MODULES(i).frmidx = v
+    '        exeVB_FORMS(v).sName = exeVB_MODULES(i).sName
+    '
+    '    End If
+    'Next i
+    
+    
+End Sub
+
+Function ScanString(fp As Integer, ByVal offset As Long) As String
 'scanne une chaine de caractère ANSI, se termine par un 8-bits NULL
 Dim b As Byte
-Get #fp, Offset, b
-Do
+Get #fp, offset, b
+Do Until b = 0
     ScanString = ScanString & Chr$(b)
-    Offset = Offset + 1
-    Get #fp, Offset, b
-Loop Until b = 0
+    offset = offset + 1
+    Get #fp, offset, b
+Loop
 
 End Function
 
@@ -1352,8 +1746,9 @@ Erase exeVB6_APIDEF()
         i = i + 1
             Input #lfp, sAdr, sOrd, sName, sDef
             If LCase$(sAdr) <> "eof" Then
+                'If sOrd > 700 Then Stop
                 ReDim Preserve exeVB6_APIDEF(1 To i)
-                exeVB6_APIDEF(i).Rva = Val("&H" & sAdr)
+                exeVB6_APIDEF(i).rva = Val("&H" & sAdr)
                 exeVB6_APIDEF(i).Ordinal = CLng(sOrd)
                 exeVB6_APIDEF(i).uName = sName
                 exeVB6_APIDEF(i).uDescr = sDef
@@ -1366,12 +1761,12 @@ Erase exeVB6_APIDEF()
 
 End Sub
 
-Private Function VBfunc_Description(ByVal inOrdinal As Long, ByVal inAPIname As String, ByRef outRName As String) As String
+Function VBfunc_Description(ByVal inOrdinal As Long, ByVal inAPIname As String, ByRef outRName As String) As String
 'renvoi la fonction vb associé à l'api vb appelé
 Dim i As Long
 
 
-If inOrdinal > 0 And inAPIname = "" Then
+If inOrdinal > 99 Then ' And inAPIname = "" Then
     'par ordinal :
     For i = 1 To UBound(exeVB6_APIDEF())
         If exeVB6_APIDEF(i).Ordinal = inOrdinal Then
@@ -1397,6 +1792,8 @@ End Function
 
 Private Sub ScanTable(fp As Integer, ByVal OffsetADR As Long, ByVal OffsetSTR As Long, ByRef outADRarray() As IMPORT_API_LOOKUP)
 'scanne une table d'addresse, se termine par un 32-bits NULL
+'OffsetADR : position de la table d'adressage (argument d'appel vers la DLL importé)
+'OffsetSTR : position dans la table des noms
 Dim l As Long, i As Long, s As Long
 
     
@@ -1407,6 +1804,7 @@ Dim l As Long, i As Long, s As Long
         ReDim Preserve outADRarray(1 To i)
         outADRarray(i).Address = l
         Get #fp, OffsetSTR, s
+        outADRarray(i).VaTbl = OffsetADR - 1
         If (s And &H80000000) = 0 Then
             'importation par nom
             outADRarray(i).ApiName = ScanString(fp, s + 3)
@@ -1528,7 +1926,7 @@ With Alist
                 .AddItem " -Contrôle " & i & " :"
                 .AddItem "  - nom : " & exeVB_CONTROL(i).sName & VBCTRL_CollectionSpare(exeVB_CONTROL(i).sName)
                 .AddItem "  - type : " & exeVB_CONTROL(i).id & "  (" & exeVB_CONTROL(i).sType & ")"
-                .AddItem "  - offset " & exeVB_CONTROL(i).Offset
+                .AddItem "  - offset " & exeVB_CONTROL(i).offset
                 
                 If exeVB_CTRL_PRP(i).sCaption <> "" Then
                     .AddItem "    .Caption=" & exeVB_CTRL_PRP(i).sCaption
@@ -1661,71 +2059,71 @@ With Alist
     
     .AddItem "===== PE header ====="
     
-    .AddItem exePEHEAD.Signature & "  (" & PE_Check(exePEHEAD.Signature) & ")"
-    .AddItem exePEHEAD.CpuType & " : pour CPU " & PE_CpuType(exePEHEAD.CpuType)
-    .AddItem exePEHEAD.Objects & " objets (alias sections)"
+    .AddItem "Signature : " & exePEHEAD.Signature & "  (" & PE_Check(exePEHEAD.Signature) & ")"
+    .AddItem "CpuType : " & exePEHEAD.CpuType & " : pour CPU " & PE_CpuType(exePEHEAD.CpuType)
+    .AddItem "Objets : " & exePEHEAD.Objects & " objets (alias sections)"
     
-    .AddItem exePEHEAD.TimeDate
-    .AddItem exePEHEAD.PointerToSymbolTable
+    .AddItem "TimeDate : " & exePEHEAD.TimeDate
+    .AddItem "Pointeur symboles : " & exePEHEAD.PointerToSymbolTable
     
-    .AddItem exePEHEAD.NumberOfSymbols
-    .AddItem exePEHEAD.NThdrSize
-    .AddItem exePEHEAD.Flags & " : " & PE_Flags(exePEHEAD.Flags)
+    .AddItem "Nombre de symboles: " & exePEHEAD.NumberOfSymbols
+    .AddItem "Taille header NT : " & exePEHEAD.NThdrSize
+    .AddItem "Flags : " & exePEHEAD.Flags & " : " & PE_Flags(exePEHEAD.Flags)
     
     .AddItem "===== optional header ====="
     
-    .AddItem exeOPHEAD.SizeOfOptionalHeader
-    .AddItem exeOPHEAD.LinkMajor
-    .AddItem exeOPHEAD.LinkMinor
-    .AddItem exeOPHEAD.Reserved1
+    .AddItem "Taille : " & exeOPHEAD.SizeOfOptionalHeader
+    .AddItem "Link Major : " & exeOPHEAD.LinkMajor
+    .AddItem "Link Minor : " & exeOPHEAD.LinkMinor
+    .AddItem "Reserved 1 : " & exeOPHEAD.Reserved1
     
-    .AddItem exeOPHEAD.Reserved2
-    .AddItem exeOPHEAD.Reserved3
+    .AddItem "Reserved 2 : " & exeOPHEAD.Reserved2
+    .AddItem "Reserved 3 : " & exeOPHEAD.Reserved3
     
     .AddItem "Point d'entrée code : " & exeOPHEAD.EntryPointRVA
-    .AddItem exeOPHEAD.Reserved4
+    .AddItem "Reserved 4 : " & exeOPHEAD.Reserved4
     
-    .AddItem exeOPHEAD.Reserved5
-    .AddItem "ImageBase : " & exeOPHEAD.ImageBase & " (" & Hex(exeOPHEAD.ImageBase) & ")"
+    .AddItem "Reserved 5 : " & exeOPHEAD.Reserved5
+    .AddItem "ImageBase : " & exeOPHEAD.ImageBase & " (" & Hex(exeOPHEAD.ImageBase) & "h)"
     
-    .AddItem exeOPHEAD.ObjectAlign
-    .AddItem exeOPHEAD.FileAlign
+    .AddItem "Object Align : " & exeOPHEAD.ObjectAlign
+    .AddItem "File Align : " & exeOPHEAD.FileAlign
     
-    .AddItem exeOPHEAD.OsMajor
-    .AddItem exeOPHEAD.OsMinor
-    .AddItem exeOPHEAD.UserMajor
-    .AddItem exeOPHEAD.UserMinor
+    .AddItem "OS Major : " & exeOPHEAD.OsMajor
+    .AddItem "OS Minor : " & exeOPHEAD.OsMinor
+    .AddItem "User Major : " & exeOPHEAD.UserMajor
+    .AddItem "User Minor : " & exeOPHEAD.UserMinor
     
-    .AddItem exeOPHEAD.SubSysMajor
-    .AddItem exeOPHEAD.SubSysMinor
-    .AddItem exeOPHEAD.Reserved6
+    .AddItem "SubSys Major : " & exeOPHEAD.SubSysMajor
+    .AddItem "SubSys Major : " & exeOPHEAD.SubSysMinor
+    .AddItem "Reserved 6 : " & exeOPHEAD.Reserved6
     
     .AddItem "Taille image : " & exeOPHEAD.ImageSize
     .AddItem "Taille header : " & exeOPHEAD.HeaderSize
     
     .AddItem "Checksum : " & Hex(exeOPHEAD.FileCheckSum)
-    .AddItem exeOPHEAD.SubSystemNT
+    .AddItem "SubSystem NT : " & exeOPHEAD.SubSystemNT
     .AddItem "Flag de dll : " & exeOPHEAD.DLLflags
     
-    .AddItem exeOPHEAD.StackReserveSize
-    .AddItem exeOPHEAD.StackCommitSize
+    .AddItem "Stack Reserve Size : " & exeOPHEAD.StackReserveSize
+    .AddItem "Stack Commit Size : " & exeOPHEAD.StackCommitSize
     
-    .AddItem exeOPHEAD.HeapReserveSize
-    .AddItem exeOPHEAD.HeapCommitSize
+    .AddItem "Heap Reserve Size : " & exeOPHEAD.HeapReserveSize
+    .AddItem "Heap Commit Size : " & exeOPHEAD.HeapCommitSize
     
-    .AddItem exeOPHEAD.LoaderFlags
-    .AddItem exeOPHEAD.NumberOfRvaAndSizes
+    .AddItem "Loader Flags : " & exeOPHEAD.LoaderFlags
+    .AddItem "Nb of rva and sizes : " & exeOPHEAD.NumberOfRvaAndSizes
 
     .AddItem "===== data directories ====="
 
-    .AddItem exeHEADIR.RvaEXPORT_TABLE
-    .AddItem exeHEADIR.RvaTOTAL_EXPORT_DATA_SIZE
+    .AddItem "Export rva : " & exeHEADIR.RvaEXPORT_TABLE
+    .AddItem "Export size : " & exeHEADIR.RvaTOTAL_EXPORT_DATA_SIZE
     
-    .AddItem exeHEADIR.RvaIMPORT_TABLE
-    .AddItem exeHEADIR.RvaTOTAL_IMPORT_DATA_SIZE
+    .AddItem "Import rva : " & exeHEADIR.RvaIMPORT_TABLE
+    .AddItem "Import size : " & exeHEADIR.RvaTOTAL_IMPORT_DATA_SIZE
     
-    .AddItem exeHEADIR.RvaRESOURCE_TABLE
-    .AddItem exeHEADIR.RvaTOTAL_RESOURCE_DATA_SIZE
+    .AddItem "Resource rva : " & exeHEADIR.RvaRESOURCE_TABLE
+    .AddItem "Resource size : " & exeHEADIR.RvaTOTAL_RESOURCE_DATA_SIZE
     
     .AddItem exeHEADIR.RvaEXCEPTION_TABLE
     .AddItem exeHEADIR.RvaTOTAL_EXCEPTION_DATA_SIZE
@@ -1825,8 +2223,8 @@ Dim UniqueID() As Integer
         If es > 0 Then
             'il y a des API déclarés via vb !
             For l = 1 To es
-                If exeVB_API(l).sFrom <> BGS Then
-                    BGS = exeVB_API(l).sFrom
+                If exeVB_API(l).lFrom > 0 Then
+                    BGS = exeVB_API(l).lFrom
                     p3 = p3 & "      Déclaré dans " & BGS & " (info non garantie)" & vbCrLf
                 End If
                 p3 = p3 & "      - " & UCase$(exeVB_API(l).sDll) & "." & exeVB_API(l).sName & vbCrLf
@@ -1903,11 +2301,14 @@ Sub PrintJolieInterface(ByRef ATree As TreeView)
 Dim i, j, k, l
 Dim cf, cm, cd, cu, cs
 Dim op As Boolean
+Dim TDs As String
 
 With ATree
     .Nodes.Clear
 
     .Nodes.Add , 0, "root", exeVB_PROJECTNAME, 3
+    .Nodes.Add "root", 4, , "Point d'entrée VB : " & Hex$(exeVB_VBEP - exeOPHEAD.ImageBase) & "h", 16
+    .Nodes.Add "root", 4, , "Point d'entrée structure : " & Hex$(exeVB_VBEP - exeOPHEAD.ImageBase + 48) & "h", 16
     
     
     'affiche les feuilles
@@ -1921,7 +2322,7 @@ With ATree
                 .Nodes.Item("modu").ExpandedImage = 2
             End If
             .Nodes.Add "modu", 4, LCase$(exeVB_MODULES(i).sName), exeVB_MODULES(i).sName, 10
-            .Nodes.Add LCase$(exeVB_MODULES(i).sName), 4, , "Subs contenu : " & exeVB_MODULES(i).NumSub, 19
+            .Nodes.Add LCase$(exeVB_MODULES(i).sName), 4, , "Subs contenu : " & exeVB_MODULES(i).numsub, 19
             .Nodes.Add LCase$(exeVB_MODULES(i).sName), 4, , "Offset structure : " & Hex$(exeVB_MODULES(i).RvaOffset) & "h", 16
 
         Case 98435  'form
@@ -1932,11 +2333,25 @@ With ATree
             End If
             TNs = LCase$(exeVB_MODULES(i).sName)
             .Nodes.Add "form", 4, TNs, exeVB_MODULES(i).sName, 6
-            .Nodes.Add TNs, 4, , "Subs contenu : " & exeVB_MODULES(i).NumSub, 19
+            .Nodes.Add TNs, 4, TNs & "-subs", "Subs contenu : " & exeVB_MODULES(i).numsub, 19
+            'sub dans la form
+                For l = 1 To UBound(exeVB_SUBS())
+                    If exeVB_SUBS(l).SubFrom = i Then
+                        If exeVB_SUBS(l).SubType = &HFFFFFFFF Then
+                            TDs = "Sub " & l & " = " & exeVB_MODULES(i).sName & ".user() : Offset " & Hex$(exeVB_SUBS(l).rvaCode) & "h"
+                        Else
+                            TDs = "Sub " & l & " = " & exeVB_MODULES(i).sName & ".Obj-" & Hex$(exeVB_SUBS(l).SubType) & "_event() : Offset " & Hex$(exeVB_SUBS(l).rvaCode) & "h"
+                        End If
+                        .Nodes.Add TNs & "-subs", 4, , TDs, 19
+                    End If
+                Next l
+                
             .Nodes.Add TNs, 4, , "Offset structure : " & Hex$(exeVB_MODULES(i).RvaOffset) & "h", 16
-            For j = 1 To UBound(exeVB_FORMS())
-                If TNs = LCase$(exeVB_CONTROL(exeVB_FORMS(j).DefPtr).sName) Then Exit For
-            Next j
+            
+            'For j = 1 To UBound(exeVB_FORMS())
+            '    If TNs = LCase$(exeVB_CONTROL(exeVB_FORMS(j).DefPtr).sName) Then Exit For
+            'Next j
+                j = exeVB_MODULES(i).frmidx
             
             .Nodes.Add TNs, 4, , "Offset objets : " & Hex$(exeVB_FORMS(j).rvaPtr) & "h", 16
             'rajoute les objets dans la form
@@ -1945,8 +2360,9 @@ With ATree
                 If exeVB_CONTROL(k).id = 276 Then .Nodes.Item(TNs).Image = 7    'icone MDI
                 
                 .Nodes.Add "form_" & TNs, 4, TNs & "_" & k, exeVB_CONTROL(k).sName & VBCTRL_CollectionSpare(exeVB_CONTROL(k).sName), 5
-                .Nodes.Add TNs & "_" & k, 4, , "Offset " & Hex$(exeVB_CONTROL(k).Offset) & "h", 16
+                .Nodes.Add TNs & "_" & k, 4, , "Offset " & Hex$(exeVB_CONTROL(k).offset) & "h, longueur " & exeVB_CONTROL(k).LenTr & " octets", 16
                 .Nodes.Add TNs & "_" & k, 4, , "Type : " & exeVB_CONTROL(k).id & "  (" & exeVB_CONTROL(k).sType & ")", 18
+                .Nodes.Add TNs & "_" & k, 4, , "systID : " & Hex$(exeVB_CONTROL(k).frmID) & "  (" & Hex$(exeVB_CONTROL(k).frmID - 709) & ")", 18
                 
                 If exeVB_CTRL_PRP(k).sCaption <> "" Then
                     .Nodes.Add TNs & "_" & k, 4, , "Caption=" & exeVB_CTRL_PRP(k).sCaption, 18
@@ -1963,6 +2379,15 @@ With ATree
                 If exeVB_CTRL_PRP(k).pWidth > 0 Then
                     .Nodes.Add TNs & "_" & k, 4, , "Width=" & exeVB_CTRL_PRP(k).pWidth, 18
                 End If
+                
+                'subs
+                For l = 1 To UBound(exeVB_SUBS())
+                    If exeVB_SUBS(l).SubFrom = i And exeVB_SUBS(l).ObjFrom = k Then
+                        TDs = "Sub " & l & " = " & exeVB_CONTROL(k).sName & "_() : Offset " & Hex$(exeVB_SUBS(l).rvaCode) & "h"
+                        .Nodes.Add TNs & "_" & k, 4, , TDs, 19
+                    End If
+                Next l
+                
             Next k
             
         Case 1146883  'classe
@@ -1972,8 +2397,15 @@ With ATree
                 .Nodes.Item("clas").ExpandedImage = 2
             End If
             .Nodes.Add "clas", 4, LCase$(exeVB_MODULES(i).sName), exeVB_MODULES(i).sName, 9
-            .Nodes.Add LCase$(exeVB_MODULES(i).sName), 4, , "Subs contenu : " & exeVB_MODULES(i).NumSub, 19
+            .Nodes.Add LCase$(exeVB_MODULES(i).sName), 4, LCase$(exeVB_MODULES(i).sName) & "-subs", "Subs contenu : " & exeVB_MODULES(i).numsub, 19
             .Nodes.Add LCase$(exeVB_MODULES(i).sName), 4, , "Offset structure : " & Hex$(exeVB_MODULES(i).RvaOffset) & "h", 16
+            
+            For l = 1 To UBound(exeVB_SUBS())
+                If exeVB_SUBS(l).SubFrom = i Then
+                    TDs = "Sub " & l & " = " & exeVB_MODULES(i).sName & ".user() : Offset " & Hex$(exeVB_SUBS(l).rvaCode) & "h"
+                    .Nodes.Add LCase$(exeVB_MODULES(i).sName) & "-subs", 4, , TDs, 19
+                End If
+            Next l
             
         Case 1941507  'contrôles utilisateur
             cu = cu + 1
@@ -1982,8 +2414,16 @@ With ATree
                 .Nodes.Item("uctl").ExpandedImage = 2
             End If
             .Nodes.Add "uctl", 4, LCase$(exeVB_MODULES(i).sName), exeVB_MODULES(i).sName, 11
-            .Nodes.Add LCase$(exeVB_MODULES(i).sName), 4, , "Subs contenu : " & exeVB_MODULES(i).NumSub, 19
+            .Nodes.Add LCase$(exeVB_MODULES(i).sName), 4, LCase$(exeVB_MODULES(i).sName) & "-subs", "Subs contenu : " & exeVB_MODULES(i).numsub, 19
             .Nodes.Add LCase$(exeVB_MODULES(i).sName), 4, , "Offset structure : " & Hex$(exeVB_MODULES(i).RvaOffset) & "h", 16
+            
+            For l = 1 To UBound(exeVB_SUBS())
+                If exeVB_SUBS(l).SubFrom = i Then
+                    TDs = "Sub " & l & " = " & exeVB_MODULES(i).sName & ".user() : Offset " & Hex$(exeVB_SUBS(l).rvaCode) & "h"
+                    .Nodes.Add LCase$(exeVB_MODULES(i).sName) & "-subs", 4, , TDs, 19
+                End If
+            Next l
+            
             
         Case Else
             'Stop
@@ -1996,7 +2436,7 @@ With ATree
     .Nodes.Item("info").ExpandedImage = 2
     
         'DLL importés
-        Dim TDs As String, ouR As String
+        Dim ouR As String
         l = UBound(exeIMPORT_DLLNAME())
         j = 1
         If l > 0 Then
@@ -2011,8 +2451,6 @@ With ATree
                 End If
                 
                 Do While j <= k
-                
-                    If exeIMPORT_APINAME(j).ApiName = "" Then Exit Do
                 
                     .Nodes.Add LCase$(exeIMPORT_DLLNAME(i).DllName), 4, exeIMPORT_APINAME(j).ApiName, exeIMPORT_APINAME(j).ApiName, 14
                     .Nodes.Add exeIMPORT_APINAME(j).ApiName, 4, , "Offset " & Hex(exeIMPORT_APINAME(j).Address) & "h", 16
@@ -2081,33 +2519,36 @@ With ATree
         .Nodes.Add "codebase", 4, "codeep", "Point d'entrée : " & Hex$(exeVB_CODEENTRY) & "h", 16
         .Nodes.Add "codeep", 4, , "Longueur : " & exeVB_CODELEN & " octets   (fin du code à " & Hex$(exeVB_CODEENTRY + exeVB_CODELEN) & "h)", 18
         'affiche les infos s'il y a un Sub Main()
-        If exeVB_CODEMAIN > 0 Then
-            .Nodes.Add "codeep", 4, "sub_main", "Sub Main", 19
-            .Nodes.Add "sub_main", 4, , "Offset " & Hex$(exeVB_CODEMAIN) & "h", 16
-        End If
+        'If exeVB_CODEMAIN > 0 Then
+        '    .Nodes.Add "codeep", 4, "sub_main", "Sub Main", 19
+        '    .Nodes.Add "sub_main", 4, , "Offset " & Hex$(exeVB_CODEMAIN) & "h", 16
+        'End If
         'affiche la liste des subs trouvés
         k = UBound(exeVB_SUBS)
         For i = 1 To k
-            'EN DEV (voir ParseVBfunc())
-            Select Case exeVB_SUBS(i).SubType
-            Case 1
-                TDs = "Sub "
-            Case 2
-                TDs = "Sub "
-            Case Else
-                TDs = "Sub "
-            End Select
-            Select Case exeVB_SUBS(i).SubFrom
-            Case 1
-                TNs = " "
-            Case 3
-                TNs = " "
-            Case 5
-                TNs = " "
-            Case Else
-                TNs = " "
-            End Select
+            
+            'Select Case exeVB_SUBS(i).SubType
+            'Case 1
+            '    TDs = "Sub "
+            'Case 2
+            '    TDs = "Sub "
+            'Case Else
+            '    TDs = "Sub "
+            'End Select
+            TDs = "Sub "
+            If exeVB_SUBS(i).SubFrom > 0 Then
+                If exeVB_SUBS(i).SubType = &HFFFFFFFF Then
+                    TNs = " (" & exeVB_MODULES(exeVB_SUBS(i).SubFrom).sName & ".user() :"
+                Else
+                    TNs = " (" & exeVB_MODULES(exeVB_SUBS(i).SubFrom).sName & ".Obj-" & Hex$(exeVB_SUBS(i).SubType) & "_event() :"
+                End If
+            ElseIf exeVB_SUBS(i).SubFrom = -1 Then
+                TNs = " (module).user() :"
+            Else
+                TNs = " (Sub Main) :"
+            End If
             .Nodes.Add "codeep", 4, , TDs & i & TNs & " Offset " & Hex$(exeVB_SUBS(i).rvaCode) & "h", 19
+            
         Next i
 
     
@@ -2285,10 +2726,45 @@ End Function
 
 Sub PrintExe(Fichier As String, ByVal OffsetMod16 As Long, Ligne As Long, oPCB As PictureBox)
 'affichage dans une picturebox du fichier en hexa
-Dim i, j, k, l, m
+Dim i, j, k, l, m, n
 Dim bArray() As Byte
+Dim cArray(1 To 15) As Long
 Dim Lp As Integer
 Dim Tstr As String
+'i = incrémenteur de ligne
+'j = valeur offset dans le fichier de la ligne en cours (correspondance de i)
+'k = index du tableau tampon contenant les octets du fichier
+'l = place mémoire pour placer la valeur hexa d'un octet dans une string
+'m = place mémoire pour placer la valeur ANSI d'un octet dans la string
+'n = valeur offset dans le fichier de l'octet lu
+
+'marqueur coloré :
+'en-tête exe & PE = gris très foncé
+cArray(1) = &H202020
+'table API import, noms des API = bleu
+cArray(2) = vbBlue
+'table API déclaré VB = bleu clair
+cArray(3) = RGB(128, 128, 255)
+'structure de définition VB = marron
+cArray(4) = RGB(64, 64, 32)
+'structure VB form = rouge
+cArray(5) = vbRed
+'structure VB modu = orange
+cArray(6) = RGB(192, 128, 128)
+'structure VB clas = magenta
+cArray(7) = vbMagenta
+'structure VB ctrl = rose
+cArray(8) = RGB(192, 112, 112)
+'variables/données VB = vert
+cArray(9) = RGB(32, 192, 32)
+'table de sub VB = vert clair
+cArray(10) = RGB(0, 192, 0)
+'code compilé VB = vert foncé
+cArray(11) = RGB(0, 128, 0)
+'ressources PE = gris fonçé
+cArray(12) = &H505050
+
+
 With oPCB
 
     ReDim bArray(1 To (16 * Ligne) + 1)
@@ -2303,6 +2779,11 @@ With oPCB
     .Cls
     .FontSize = 8
     .FontName = "Courier"
+    .CurrentX = 15
+    .CurrentY = 0
+    .ForeColor = &H888888
+    oPCB.Print "-Offset- 00 01 02 03 04 05 06 07-08 09 0A 0B 0C 0D 0E 0F ------ANSI------"
+    .ForeColor = vbBlack
     
     j = OffsetMod16 * 16
     
@@ -2393,53 +2874,53 @@ End Sub
 Private Sub Init_VBCTRL()
 'les noms indiqués sont ceux des fichiers .frm aux lignes "BEGIN"
     ReDim vbDEFCTRL(24)
-    vbDEFCTRL(1).inID = 269
+    vbDEFCTRL(1).inID = 269  '01 0D
     vbDEFCTRL(1).cType = "VB.Form"
-    vbDEFCTRL(2).inID = 549
+    vbDEFCTRL(2).inID = 549  '02 25
     vbDEFCTRL(2).cType = "VB.Data"
-    vbDEFCTRL(3).inID = 1042
+    vbDEFCTRL(3).inID = 1042 '04 12
     vbDEFCTRL(3).cType = "VB.FileListBox"
-    vbDEFCTRL(4).inID = 523
+    vbDEFCTRL(4).inID = 523  '02 0B
     vbDEFCTRL(4).cType = "VB.Timer"
-    vbDEFCTRL(5).inID = 1041
+    vbDEFCTRL(5).inID = 1041 '04 11
     vbDEFCTRL(5).cType = "VB.DirListBox"
-    vbDEFCTRL(6).inID = 1040
+    vbDEFCTRL(6).inID = 1040 '04 10
     vbDEFCTRL(6).cType = "VB.DriveListBox"
-    vbDEFCTRL(7).inID = 522
+    vbDEFCTRL(7).inID = 522  '02 0A
     vbDEFCTRL(7).cType = "VB.VScrollBar"
-    vbDEFCTRL(8).inID = 521
+    vbDEFCTRL(8).inID = 521  '02 09
     vbDEFCTRL(8).cType = "VB.HScrollBar"
-    vbDEFCTRL(9).inID = 1032
+    vbDEFCTRL(9).inID = 1032 '04 08
     vbDEFCTRL(9).cType = "VB.ListBox"
-    vbDEFCTRL(10).inID = 1287
+    vbDEFCTRL(10).inID = 1287 '05 07
     vbDEFCTRL(10).cType = "VB.ComboBox"
-    vbDEFCTRL(11).inID = 262
+    vbDEFCTRL(11).inID = 262  '01 06
     vbDEFCTRL(11).cType = "VB.OptionButton"
-    vbDEFCTRL(12).inID = 261
+    vbDEFCTRL(12).inID = 261  '01 05
     vbDEFCTRL(12).cType = "VB.CheckBox"
-    vbDEFCTRL(13).inID = 260
+    vbDEFCTRL(13).inID = 260  '01 04
     vbDEFCTRL(13).cType = "VB.CommandButton"
-    vbDEFCTRL(14).inID = 259
+    vbDEFCTRL(14).inID = 259  '01 03
     vbDEFCTRL(14).cType = "VB.Frame"
-    vbDEFCTRL(15).inID = 1026
+    vbDEFCTRL(15).inID = 1026 '04 02
     vbDEFCTRL(15).cType = "VB.TextBox"
-    vbDEFCTRL(16).inID = 1280
+    vbDEFCTRL(16).inID = 1280 '05 00
     vbDEFCTRL(16).cType = "VB.PictureBox"
-    vbDEFCTRL(17).inID = 792
+    vbDEFCTRL(17).inID = 792  '03 18
     vbDEFCTRL(17).cType = "VB.Image"
-    vbDEFCTRL(18).inID = 791
+    vbDEFCTRL(18).inID = 791  '03 17
     vbDEFCTRL(18).cType = "VB.Line"
-    vbDEFCTRL(19).inID = 1046
+    vbDEFCTRL(19).inID = 1046 '04 16
     vbDEFCTRL(19).cType = "VB.Shape"
-    vbDEFCTRL(20).inID = 257
+    vbDEFCTRL(20).inID = 257  '01 01
     vbDEFCTRL(20).cType = "VB.Label"
-    vbDEFCTRL(21).inID = 803
+    vbDEFCTRL(21).inID = 803  '03 23
     vbDEFCTRL(21).cType = "VB.OLE"
-    vbDEFCTRL(22).inID = 787
+    vbDEFCTRL(22).inID = 787  '03 13
     vbDEFCTRL(22).cType = "VB.Menu"
-    vbDEFCTRL(23).inID = 276
+    vbDEFCTRL(23).inID = 276  '01 14
     vbDEFCTRL(23).cType = "VB.MDIForm"
-    vbDEFCTRL(24).inID = 6440
+    vbDEFCTRL(24).inID = 6440 '19 28
     vbDEFCTRL(24).cType = "Objet-classe locale ?"
 
 End Sub
@@ -2652,15 +3133,255 @@ Dim i, j, k
 
 End Function
 
-Function Utils_EXEfilename(ByRef fullpath As String) As String
-'renvoi que le nom du fichier à la fin d'un nom complet (dossier + fichier)
-Dim p
+Sub VBCTRL_AsmProperty()
+'renvoi la propriété appelé en fonction de la valeur...
+ReDim exeVB_Prop(1 To &H2C4)
 
-    p = InStrRev(fullpath, "\")
-    If p > 0 Then
-        Utils_EXEfilename = Mid$(fullpath, p + 1)
-    Else
-        Utils_EXEfilename = fullpath
-    End If
+'reste a établir la liste exhaustive pour les 26 contrôle/objets de VB ...
+'a noté que &HAC peut être textbox.fontname ou filelistbox.path, et d'autres encore!
+'il faut donc faire un tableau à double entrée...
+
+exeVB_Prop(&H54) = "Caption"
+'call dword ptr [eax+0000009C] = Visible
+exeVB_Prop(&H9C) = "Visible"
+'call dword ptr [eax+0000016C] = TextBox.Alignment
+'call dword ptr [eax+000000EC] = Label.Alignment
+exeVB_Prop(&HEC) = "Alignment (label)"
+'call dword ptr [eax+000001CC] = TextBox.Appearance
+'call dword ptr [eax+00000184] = Label.Appearance
+'call dword ptr [eax+0000014C] = AutoRedraw
+exeVB_Prop(&H14C) = "AutoRedraw"
+'call dword ptr [eax+5C] = TextBox.BackColor
+'call dword ptr [eax+5C] = Timer.Enabled
+exeVB_Prop(&H5C) = "Enabled (timer)"
+'call dword ptr [eax+000000E4] = Borderstyle
+'call dword ptr [eax+00000234] = CausesValidation
+'call dword ptr [eax+000001D0] = Container
+'call dword ptr [eax+000001A4] = DataChanged
+'call dword ptr [eax+0000019C] = DataField
+'call dword ptr [eax+00000240] = DataFormat
+'call dword ptr [eax+0000023C] = DataMember
+'call dword ptr [eax+0000013C] = DragIcon
+'call dword ptr [eax+00000134] = DragMode
+'call dword ptr [eax+0000008C] = Enabled
+'call dword ptr [eax+000001BC] = Font
+'call dword ptr [eax+000000BC] = FontBold
+'call dword ptr [eax+000000C4] = FontItalic
+'call dword ptr [eax+000000AC] = FontName
+exeVB_Prop(&HAC) = "FontName (textbox)"
+'call dword ptr [eax+000000B4] = FontSize
+'call dword ptr [eax+000000CC] = FontStrikethru
+'call dword ptr [eax+000000D4] = FontUnderline
+'call dword ptr [eax+64] = ForeColor
+exeVB_Prop(&H64) = "ForeColor"
+'call dword ptr [eax+00000084] = Height
+exeVB_Prop(&H84) = "Height"
+'call dword ptr [eax+0000017C] = HelpContextID
+'call dword ptr [eax+00000160] = HideSelection
+'call dword ptr [eax+00000180] = hWnd
+'call dword ptr [eax+50] = Index
+'call dword ptr [eax+6C] = Left
+exeVB_Prop(&H6C) = "Left"
+'call dword ptr [eax+000000F4] = LinkItem
+'call dword ptr [eax+000000FC] = LinkMode
+'call dword ptr [eax+00000144] = LinkTimeout
+'call dword ptr [eax+000000EC] = LinkTopic
+'call dword ptr [eax+000001B4] = TextBox.Locked
+exeVB_Prop(&H1B4) = "Locked"
+'call dword ptr [eax+00000174] = MaxLength
+'call dword ptr [eax+000001AC] = MouseIcon
+'call dword ptr [eax+0000009C] = MousePointer
+'call dword ptr [eax+00000100] = MultiLine
+'call dword ptr [eax+48] = Name
+'call dword ptr [eax+000001EC] = OLEDragMode
+'call dword ptr [eax+000001F4] = OLEDropMode
+'call dword ptr [eax+00000128] = Parent
+'call dword ptr [eax+0000015C] = PasswordChar
+'call dword ptr [eax+000001DC] = RightToLeft
+'call dword ptr [eax+00000108] = ScrollBars
+'call dword ptr [eax+0000011C] = SelLength
+'call dword ptr [eax+00000114] = SelStart
+'call dword ptr [eax+000000DC] = TabIndex
+'call dword ptr [eax+0000014C] = TabStop
+'call dword ptr [eax+00000154] = Tag
+'call dword ptr [eax+000000A4] = Text
+exeVB_Prop(&HA4) = "Text"
+'call dword ptr [eax+000001E4] = ToolTipText
+'call dword ptr [eax+74] = Top
+exeVB_Prop(&H74) = "Top"
+'call dword ptr [eax+00000094] = TextBox.Visible
+exeVB_Prop(&H94) = "Visible (textbox)"
+'call dword ptr [eax+000001C4] = WhatsThisHelpID
+'call dword ptr [eax+7C] = Width
+exeVB_Prop(&H7C) = "Width"
+
+'call dword ptr [eax+000001A4] = FileListBox.Appearance
+'call dword ptr [eax+000000D4] = Archive
+'call dword ptr [eax+000000BC] = FileName
+exeVB_Prop(&HBC) = "FileName (filelistbox)"
+'call dword ptr [eax+000000DC] = Hidden
+'call dword ptr [eax+000000AC] = Path
+exeVB_Prop(&HAC) = "Path (filelistbox)"
+'call dword ptr [eax+000000B4] = Pattern
+exeVB_Prop(&HB4) = "Pattern (filelistbox)"
+'call dword ptr [eax+000000F8] = List()
+exeVB_Prop(&HF8) = "List ()"
+'call dword ptr [eax+000000E8] = ListCount
+exeVB_Prop(&HE8) = "ListCount"
+'call dword ptr [eax+000000F0] = ListIndex
+exeVB_Prop(&HF0) = "ListIndex"
+'call dword ptr [eax+00000168] = MultiSelect
+'call dword ptr [eax+000000C4] = FileListBox.Normal
+'call dword ptr [eax+00000170] = Selected
+exeVB_Prop(&H170) = "Selected"
+'call dword ptr [eax+000000E4] = FileListBox.System
+'call dword ptr [eax+000000CC] = FileListBox.ReadOnly
+
+'call dword ptr [eax+000000C0] = DirListBox.Path"
+exeVB_Prop(&HC0) = "List (dirlistbox)"
+
+exeVB_Prop(&H1E8) = "Clear (listbox)"
+
+
+'call dword ptr [eax+5C] = Timer.Enabled
+'call dword ptr [eax+64] = Timer.Interval
+exeVB_Prop(&H64) = "Interval (timer)"
+
+'call dword ptr [eax+000000E0] = CheckBox.Value
+exeVB_Prop(&HE0) = "Value (checkbox)"
+'call dword ptr [eax+00000190] = Style
+
+'call dword ptr [eax+58] = Form.hWnd
+exeVB_Prop(&H58) = "hWnd (form)"
+'call dword ptr [eax+000002C4] = Form.Cls
+exeVB_Prop(&H2C4) = "Cls (form)"
+'call dword ptr [eax+00000254] = Form.Appearance
+exeVB_Prop(&H254) = "Appearance (form)"
+
+exeVB_Prop(&H278) = "Cls (picturebox)"
+
+
+End Sub
+
+Function ByteToStr(inB() As Byte) As String
+'converti des bytes en hex dump
+Dim i, j, n, l, r
+n = UBound(inB())  'longueur
+l = n \ 16         'nombre de lignes de 16 octets
+r = n Mod 16       'longueur derniere ligne
+ByteToStr = Space$(l * 16 * 3 + r * 3 + l * 2)
+    
+    j = 1
+    i = 1
+    Do While j <= n
+        Mid$(ByteToStr, i, 2) = Right$("0" & Hex$(inB(j)), 2)
+        i = i + 3
+        If j Mod 16 = 0 Then 'retour à la ligne
+            Mid$(ByteToStr, i, 2) = vbCrLf
+            i = i + 2
+        End If
+        j = j + 1
+    Loop
 
 End Function
+
+
+Public Sub Util_SnifStart(frmJI As TreeView, ByVal epva As Long)
+'scanner recursif de RVA
+Dim fp As Integer
+Dim lDump As Long, min, max
+Dim followup
+Dim lkey As String
+min = exeOPHEAD.ImageBase + 1024
+max = exeOPHEAD.ImageBase + exeFILENAMEsize
+
+    fp = FreeFile
+    Open exeFILENAMElong For Binary Access Read As #fp
+    followup = 1
+    lkey = "a" & CStr(epva + exeOPHEAD.ImageBase)
+    frmJI.Nodes.Add , , lkey, "Offset " & Hex$(epva), 1
+    Call Util_SnifNext(min, max, fp, followup, lkey, epva + exeOPHEAD.ImageBase, frmJI)
+    Close #fp
+
+End Sub
+
+Private Sub Util_SnifNext(ByVal min As Long, ByVal max As Long, ByVal fp As Integer, ByVal fu As Long, skey As String, ByVal rva As Long, frmJI As TreeView)
+'frmJI.Arbre.Nodes.Add fu, 4, , offset, 16
+Dim i As Long, ofs As Long, lDump As Long
+Dim lkey As String, decs As String
+On Local Error Resume Next
+
+    ofs = rva - exeOPHEAD.ImageBase + 1
+    For i = 1 To 12
+        decs = "+" & Format$((i - 1) * 4, "00") & " "
+        Get #fp, ofs, lDump
+        If lDump > min And lDump < max Then
+            lkey = "a" & lDump
+            frmJI.Nodes.Add skey, 4, lkey, decs & Hex$(lDump), 16
+            If Err.Number <> 35602 Then
+                Call Util_SnifNext(min, max, fp, fu + 1, lkey, lDump, frmJI)
+            Else
+                Err.Clear
+                frmJI.Nodes.Add skey, 4, , decs & Hex$(lDump), 16
+            End If
+        Else
+            frmJI.Nodes.Add skey, 4, , decs & Right$("0000000" & Hex$(lDump), 8) & " - " & ScanString(fp, ofs), 18
+        End If
+        ofs = ofs + 4
+    Next i
+    
+End Sub
+
+Public Sub Util_BackStart(frmJI As TreeView, ByVal epva As Long)
+'scanner inverse d'appel RVA
+Dim fp As Integer
+Dim lDump As Long, lng, i, j, nva, cva, ptr, rva
+Dim followup
+Dim lkey As String, pkey As String
+Dim bDump() As Long
+Dim stxt As String
+ReDim bDump(1 To (exeFILENAMEsize - 4096) / 4)
+lng = UBound(bDump)
+
+    fp = FreeFile
+    Open exeFILENAMElong For Binary Access Read As #fp
+    followup = 1
+    Get #fp, 4097, bDump()
+    lDump = bDump(epva / 4 - 1023)
+    pkey = "a" & CStr(epva + exeOPHEAD.ImageBase)
+    frmJI.Nodes.Add , , pkey, "Offset " & Hex$(epva) & " : " & Right$("0000000" & Hex$(lDump), 8) & " - " & ScanString(fp, epva + 1), 1
+    nva = epva + exeOPHEAD.ImageBase
+    
+    Call Util_BackNext(nva, bDump(), lng, pkey, frmJI)
+    
+    Close #fp
+
+End Sub
+
+Private Sub Util_BackNext(ByVal rva_to_find As Long, ByRef bDump() As Long, ByVal lng As Long, pkey As String, frmJI As TreeView)
+Dim i, j, cva, nrva
+Dim lkey As String
+Static fu As Long
+On Local Error Resume Next
+fu = fu + 1
+If fu > 150 Then Exit Sub
+
+    For i = 0 To -10 Step -1
+        cva = rva_to_find + (i * 4)
+        For j = 1 To lng
+            If bDump(j) = cva Then
+                nrva = j * 4 + 4092
+                lkey = "a" & nrva
+                frmJI.Nodes.Add pkey, 4, lkey, "Offset " & Hex$(nrva) & " ask jmp to " & Hex$(cva) & " ( soit " & Hex$(rva_to_find - exeOPHEAD.ImageBase) & " + " & (i * 4) & ")", 16
+                If Err.Number = 35602 Then
+                    Err.Clear
+                    Exit Sub
+                End If
+                'If nrva = (exeVB_VBEP - exeOPHEAD.ImageBase + 48) Then Stop
+                Call Util_BackNext(nrva + exeOPHEAD.ImageBase, bDump(), lng, lkey, frmJI)
+            End If
+        Next j
+    Next i
+
+End Sub
+

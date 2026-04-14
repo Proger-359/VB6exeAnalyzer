@@ -5,6 +5,7 @@ Attribute VB_Name = "unASM"
 '
 'Par Proger
 'septembre 2003
+'reprise octobre 2005
 '
 ' module de désassemblage de code (80586)
 ' source : juste une liste des opcode.
@@ -96,10 +97,13 @@ Private Type ASM_OPCODE
     '           73
     '           74
     
+    'prefix     100
+    '
+    'm2byte     127  'fpu
     'm32real    128  'fpu
     'm64real    129  'fpu
     'm80real    130  'fpu
-    '           131
+    'm94/108    131  'fpu
     'm16int     132  'fpu
     'm32int     133  'fpu
     'm64int     134  'fpu
@@ -127,19 +131,319 @@ End Type
     Private TblASM_REG(0 To 7) As ASM_REGISTER
 
 'pointe vers l'entrée asm_opcode dont le premier byte correspond
-Private TblPtrASM(0 To 255) As Long
+Public TblPtrASM(0 To 255) As Long
 
-'contient le texte désassemblé, ligne par ligne
+'contient le texte désassemblé, ligne par ligne DESUET
 Public StrDEASM() As String
+
+'descripteur de destination hors code compilé
+Type RVATARGET
+    rva As Long    'offset relatif
+    StrS As String 'struct information
+    StrD As String 'data information
+End Type
+Public RVAT_LIST() As RVATARGET
+Public RVAT_Len As Long
+
+'======= Visual Basic désassemblage spécial ========
+'contient le texte désassemblé et analysé
+Type VBDEASM
+    rvaCode As Long       'addresse
+    sHexDump As String    'octets lus
+    sUnAsm As String      'décodage assembleur
+    sStruct As String     'information de structure : Sub,String,APIcall,EP,...
+    sData As String       'contenu/référent : nom,valeur,index,...
+    rvaJump As Long       's'il y a lieu (jmp/call) : destination
+    lData As Long         's'il y a lieu : valeur du paramètre
+    imDump As Integer      'valeur des 2 premiers octets de l'opcode
+End Type
+    Public ASM_LIST() As VBDEASM
+'indexes
+Public ASM_SubIdx() As Long  'Subs
+Public ASM_StrIdx() As Long  'Strings
+Public ASM_ApiIdx() As Long  'API Calls
+Public ASM_ObjIdx() As Long  'Objects Calls (objets standard)
+
+Public ASM_FILE As String 'nom complet du fichier dons le listing déasm est en mémoire
+
+Sub VBCODE_DeAsm(ByVal EntryPoint As Long, ByVal fp As Integer, ByVal codelen As Long, ByVal EntryRva As Long)
+Dim i, c, o, rva, AdV   'variables d'itération et de progression dans le code
+Dim ta, ip, sp, ap, op  'variables de progression d'index
+Dim p, jrva, cl, cs, cp 'variables de l'interpréteur/analyseur
+Dim sub_en_cours        'index du sub qui est en cours de désassemblage
+Dim last_obj, freeobj   'indique le dernier objet appelé, index indicateur de l'api freeobj
+Dim bDump As Byte, iDump As Integer, lDump As Long
+Dim bArray(1 To 14) As Byte
+Dim sBuffer As String, sB2 As String
+Erase ASM_LIST()
+Erase ASM_SubIdx(): Erase ASM_StrIdx(): Erase ASM_ApiIdx(): Erase ASM_ObjIdx()
+ReDim ASM_StrIdx(0) 'anticrash
+cs = UBound(PEexe.exeVB_SUBS)
+cp = UBound(PEexe.exeVB_EP())
+
+
+'VIEUX CODE
+GoTo s_etape2
+
+
+    'etape 1 : préparation des descripteurs de saut hors code
+    o = 1
+    'liste des API et zones d'appel
+    ReDim RVAT_LIST(1 To (UBound(PEexe.exeVB6_APICALLS()) * 2 + UBound(PEexe.exeVB_API()) + cs + cp))
+    For i = 1 To UBound(PEexe.exeVB6_APICALLS())
+       RVAT_LIST(o).rva = PEexe.exeVB6_APICALLS(i).rva + PEexe.exeOPHEAD.ImageBase
+       If PEexe.exeVB6_APICALLS(i).ApiVbDefPtr <> 0 Then
+            RVAT_LIST(o).StrS = "API VB"
+            sBuffer = ""
+            sB2 = PEexe.VBfunc_Description(Val(Mid$(exeIMPORT_APINAME(PEexe.exeVB6_APICALLS(i).ApiVbDefPtr).ApiName, 12)), PEexe.exeIMPORT_APINAME(PEexe.exeVB6_APICALLS(i).ApiVbDefPtr).ApiName, sBuffer)
+            If sBuffer <> "" Then sBuffer = "  - " & sBuffer
+            RVAT_LIST(o).StrD = sB2 & sBuffer & " ( " & PEexe.exeIMPORT_APINAME(PEexe.exeVB6_APICALLS(i).ApiVbDefPtr).ApiName & ")"
+            If freeobj = 0 Then
+                If PEexe.exeIMPORT_APINAME(PEexe.exeVB6_APICALLS(i).ApiVbDefPtr).ApiName = "__vbaFreeObj" Then
+                    freeobj = o
+                End If
+            End If
+            RVAT_LIST(o + 1).rva = PEexe.exeIMPORT_APINAME(PEexe.exeVB6_APICALLS(i).ApiVbDefPtr).VaTbl + PEexe.exeOPHEAD.ImageBase
+            RVAT_LIST(o + 1).StrS = RVAT_LIST(o).StrS
+            RVAT_LIST(o + 1).StrD = RVAT_LIST(o).StrD
+
+            o = o + 2
+        Else
+            RVAT_LIST(o).StrD = "API.?"
+            o = o + 1
+        End If
+    Next i
+    'api déclaré
+    For i = 1 To UBound(PEexe.exeVB_API())
+       RVAT_LIST(o).rva = PEexe.exeVB_API(i).RvaCall + PEexe.exeOPHEAD.ImageBase
+       RVAT_LIST(o).StrS = "API user"
+       RVAT_LIST(o).StrD = PEexe.exeVB_API(i).sName & " Lib " & PEexe.exeVB_API(i).sDll
+       o = o + 1
+    Next i
+    'liste des subs objets connus...
+    For i = 1 To cs
+       RVAT_LIST(o).rva = PEexe.exeVB_SUBS(i).rvaCode + PEexe.exeOPHEAD.ImageBase
+       RVAT_LIST(o).StrS = "Call Sub"
+       RVAT_LIST(o).StrD = "Sub " & i '& " (" & PEexe.exeVB_SUBS(i).sName & ")"
+       o = o + 1
+    Next i
+    'liste des EP (expérimental)
+    For i = 1 To cp
+       RVAT_LIST(o).rva = PEexe.exeVB_EP(i).rvaJmp
+       RVAT_LIST(o).StrS = "EP " & PEexe.exeVB_EP(i).oriSub & " jmp"
+       'RVAT_LIST(o).StrD = i & " (" & PEexe.exeVB_SUBS(i).sName & ")"
+       o = o + 1
+    Next i
+    'redimensionne précisément le tableau (pour eviter les entrées vide en fin)
+    ReDim Preserve RVAT_LIST(1 To o) As RVATARGET
+    RVAT_Len = o
+    'liste des EP loaders (expérimental)
+    cl = 0
+    For i = 1 To UBound(PEexe.exeVB_EP())
+        If PEexe.exeVB_EP(i).oriRva <> cl Then
+            o = o + 1
+            ReDim Preserve RVAT_LIST(1 To o) As RVATARGET
+            RVAT_LIST(o).rva = PEexe.exeVB_EP(i).oriRva
+            RVAT_LIST(o).StrS = "EP " & PEexe.exeVB_EP(i).oriSub & " load"
+            RVAT_LIST(o).StrD = "EP " & PEexe.exeVB_EP(i).oriSub & " type " & Hex$(PEexe.exeVB_EP(i).oriCode)
+            cl = PEexe.exeVB_EP(i).oriRva
+        End If
+    Next i
+    RVAT_Len = o
+
+
+s_etape2:
+    'étape 2 : désassemblage et analyse
+
+    o = EntryPoint
+    rva = EntryRva
+    cl = o + codelen
+    Do
+        'ini
+        jrva = 0
     
+        'lit
+        Get #fp, o, bDump
+        Get #fp, o, iDump
+        Get #fp, o, bArray()
+        
+        'recherche par table d'index inverse de l'opcode
+        c = GetVASM(TblPtrASM(bDump), iDump)
+        'désassemble
+        sBuffer = CodeToStr(bArray(), c, rva, AdV, jrva)
+        
+        'rajoute au listing
+        ta = ta + 1
+        ReDim Preserve ASM_LIST(1 To ta) As VBDEASM
+        ASM_LIST(ta).rvaCode = rva
+        ASM_LIST(ta).sHexDump = bArrayHexStr(bArray(), AdV)
+        ASM_LIST(ta).sUnAsm = sBuffer
+        ASM_LIST(ta).imDump = iDump
+            
+        GoTo s_trva
+            
+            'si c'est un 55h, c'est probablement un Sub. lequel ?
+            If bDump = &H55 Then
+                c = rva - PEexe.exeOPHEAD.ImageBase
+                For i = 1 To cs
+                    If PEexe.exeVB_SUBS(i).rvaCode = c Then
+                        ASM_LIST(ta).sStruct = "Sub " & i
+                        sub_en_cours = i
+                        last_obj = 0
+                        If (exeVB_SUBS(i).ObjFrom = 0 Or exeVB_SUBS(i).SubType = -1) And exeVB_SUBS(i).SubFrom >= 1 Then
+                            ASM_LIST(ta).sData = PEexe.exeVB_MODULES(exeVB_SUBS(i).SubFrom).sName & ".user()"
+                        ElseIf exeVB_SUBS(i).ObjFrom = -1 Or exeVB_SUBS(i).SubType = -10 Then
+                            ASM_LIST(ta).sData = "(module).user()"
+                        ElseIf exeVB_SUBS(i).SubFrom = 0 And exeVB_SUBS(i).SubType = 1 Then
+                            ASM_LIST(ta).sData = "Sub Main()"
+                        Else
+                            ASM_LIST(ta).sData = PEexe.exeVB_MODULES(exeVB_SUBS(i).SubFrom).sName & ".Obj-" & Hex$(exeVB_SUBS(i).SubType) & "_event()"
+                        End If
+                        'ListView1.ListItems.Item(i).ListSubItems.Item(1).ForeColor = &HA04040
+                        'mise à jour index sub
+                        ip = ip + 1
+                        ReDim Preserve ASM_SubIdx(ip)
+                        ASM_SubIdx(ip) = ta
+                        GoTo NAsm
+                    End If
+                Next i
+                
+                'sub non listé dans les structures VB : il s'agit d'un sub utilisateur dans un modules .bas compilé
+                'frmPeExe.AddInfo "debug : sub présumé trouvé @ " & Hex$(c)
+                'ASM_LIST(ta).sStruct = "Sub EP"
+                'ASM_LIST(ta).sData = "(module).user()"
+                'rajout dans la liste des subs
+                'sub_en_cours = UBound(exeVB_SUBS()) + 1
+                'ReDim Preserve PEexe.exeVB_SUBS(sub_en_cours)
+                'With PEexe.exeVB_SUBS(sub_en_cours)
+                '    .SubFrom = -1: .ObjFrom = -1
+                '    .rvaCode = c
+                '    .SubType = -10
+                'End With
+                
+                'màj index
+                ip = ip + 1
+                ReDim Preserve ASM_SubIdx(ip)
+                ASM_SubIdx(ip) = ta
+            End If
+s_trva:
+            If AdV = 1 Then
+                If bDump = &H66 Then ASM_LIST(ta).sUnAsm = "Prefix 16bits"
+                GoTo NAsm 'si l'opcode est d'un octet, alors inutile de perdre du temps en scan comme ci-dessous
+            End If
+            
+            'instruction RET xxxx ou LEAVE : très souvent ca marque la fin du sub
+                'If bDump = &HC2 Or bDump = &HC9 Then
+                '    PEexe.exeVB_SUBS(sub_en_cours).rvaEnd = Rva - PEexe.exeOPHEAD.ImageBase
+                '    PEexe.exeVB_SUBS(sub_en_cours).codelen = PEexe.exeVB_SUBS(sub_en_cours).rvaEnd - PEexe.exeVB_SUBS(sub_en_cours).rvaCode
+                'End If
+            
+            'recherche s'il y a un saut ou un appel distant
+                'p = InStr(4, sBuffer, "004", vbBinaryCompare)  '<== A OPTIMISER pour de bien meilleur perfs.
+                'If p > 0 And Len(sBuffer) >= (p + 7) Then
+                '    jrva = Val("&h" & Mid$(sBuffer, p, 8))
+                'End If
+            If jrva < &H400000 Then
+                jrva = 0
+            Else
+                If (jrva > PEexe.exeOPHEAD.ImageBase) And (jrva - PEexe.exeOPHEAD.ImageBase) < PEexe.exeFILENAMEsize Then
+                    ASM_LIST(ta).rvaJump = jrva
+                Else
+                    jrva = 0
+                End If
+            End If
+            GoTo NAsm
+            
+            'détermine si le saut est un appel vers qq chose d'existant
+            If bDump = &H68 Or bDump = &HE8 Or bDump = &HBA Or bDump = &H8B Or bDump = &HFF Or bDump = &HC7 Then
+                For i = 1 To RVAT_Len
+                    If RVAT_LIST(i).rva = jrva Then
+                        ASM_LIST(ta).sStruct = RVAT_LIST(i).StrS
+                        ASM_LIST(ta).sData = RVAT_LIST(i).StrD
+                        'mise à jour index api
+                        ap = ap + 1
+                        ReDim Preserve ASM_ApiIdx(ap)
+                        ASM_ApiIdx(ap) = ta
+                        'libère objet ?
+                        If i = freeobj Then last_obj = 0
+                    End If
+                Next i
+                
+                If i > RVAT_Len Then
+                    'aucune correspondance, alors on essaye de savoir si c'est une string
+                    jrva = jrva - PEexe.exeOPHEAD.ImageBase
+                    If jrva > 4128 And jrva < PEexe.exeVB_CODEENTRY Then
+                        Get #fp, jrva - 3, lDump
+                        If lDump > 0 And lDump < 32000 Then
+                            sBuffer = PEexe.ScanUnicode(fp, jrva + 1, lDump)
+                            If sBuffer <> "" And Asc(sBuffer & " ") > 15 Then
+                                ASM_LIST(ta).sStruct = "String"
+                                ASM_LIST(ta).sData = Chr$(34) & sBuffer & Chr$(34)
+                                'mise à jour index string
+                                sp = sp + 1
+                                ReDim Preserve ASM_StrIdx(sp)
+                                ASM_StrIdx(sp) = ta
+                            End If
+                        End If
+                    End If
+                End If
+                
+            End If
+            
+            'appel à un objet/controle (experimental)
+            If bDump = &HFF Then
+                If (iDump And &HF000) = &H9000 Or (iDump And &HF000) = &H5000 Then
+                    p = InStr(4, sBuffer, "+", vbBinaryCompare) '
+                    p = Val("&h" & Mid$(sBuffer, p + 1, InStr(5, sBuffer, "]", vbBinaryCompare) - p - 1))
+                    If p < &H61C And p > &H2C4 Then
+                        'objet
+                        ASM_LIST(ta).sData = "Référence objet " & Hex$(p) & "h (?)"
+                        last_obj = p
+                        op = op + 1
+                        ReDim Preserve ASM_ObjIdx(op)
+                        ASM_ObjIdx(op) = ta
+                    ElseIf p <= &H2C4 And p > &H47 Then
+                        If last_obj > 0 Then
+                            ASM_LIST(ta).sData = "Propriété ref_" & Hex$(last_obj) & "." & PEexe.exeVB_Prop(p)
+                        Else
+                            ASM_LIST(ta).sData = "Propriété Form." & PEexe.exeVB_Prop(p)
+                        End If
+                        op = op + 1
+                        ReDim Preserve ASM_ObjIdx(op)
+                        ASM_ObjIdx(op) = ta
+                    End If
+                End If
+            End If
+                
+            
+            
+            'EP jmp (experimental) (gouffre de performances :/ )
+            For i = 1 To cp
+                If rva = PEexe.exeVB_EP(i).rvaJmp Then
+                    ASM_LIST(ta).sStruct = "EP " & PEexe.exeVB_EP(i).oriSub & " jmp"
+                End If
+            Next i
+            
+NAsm:
+    If o Mod 12000 = 0 Then
+        'indicateur de progression non bloquant
+        frmPeExe.AddInfo "Désassemblage à " & Int((o - EntryPoint) / (cl - EntryPoint) * 100) & "%..."
+    End If
+    
+    o = o + AdV
+    rva = rva + AdV
+    Loop Until o > cl
+            
+
+End Sub
 
 
-Sub FileDeAsm(ByVal EntryPoint As Long, ByVal Fpt As Integer, ByVal CodeLen As Long, ByVal ImageRva As Long, Optional StopAtRET As Boolean = True)
+Sub FileDeAsm(ByVal EntryPoint As Long, ByVal Fpt As Integer, ByVal codelen As Long, ByVal ImageRva As Long, Optional StopAtRET As Boolean = True)
 'désassemble le code commençant à l'offset EntryPoint du fichier ouvert accessible via #Fpt.
 'ImageRVA contient l'adresse relative du point d'entrée (nécessaire pour le calcul des JMP rel)
 'CodeLen contient la distance maxi du scanner d'instruction (typiquement = LOF(Fpt))
 'StopAtRET indique au scanner de s'arrêté dès qu'une instruction RET (C2h ou C3h) est trouvé (eqv End Sub)
-Dim i, j, sl, ml, rvai, DataNeed
+Dim i, j, sl, ml, rvai, DataNeed, v
 Dim Fbyte As Byte, FLong As Integer
 Dim bArray(1 To 10) As Byte
 Dim DumpStr As String
@@ -147,32 +451,33 @@ Dim InstructStr As String
 
 sl = 0
 i = EntryPoint
-ml = i + CodeLen
+ml = i + codelen
 rvai = ImageRva
-
-If i < 100 Then
-    Stop
-    Exit Sub
-End If
 
     Do
         Get #Fpt, i, Fbyte
         Get #Fpt, i, FLong
+        
         j = GetVASM(TblPtrASM(Fbyte), FLong)
         Get #Fpt, i, bArray()
         
         
-        InstructStr = CodeToStr(bArray(), j, rvai, DataNeed)
-        DumpStr = bArrayHexStr(bArray(), DataNeed)
-        'crée la ligne : "rvaddress: byteshexdump [pad] asminstruction"
-        sl = sl + 1
-        ReDim Preserve StrDEASM(1 To sl)
-        StrDEASM(sl) = Right$("0000" & Hex$(rvai), 8) & ": " & _
-                       DumpStr & Space$(13 - Len(DumpStr)) & _
-                       InstructStr
+        InstructStr = CodeToStr(bArray(), j, rvai, DataNeed, v)
+        If InstructStr <> "" Then
+            DumpStr = bArrayHexStr(bArray(), DataNeed)
+            'crée la ligne : "rvaddress: byteshexdump [pad] asminstruction"
+            sl = sl + 1
+            ReDim Preserve StrDEASM(1 To sl)
+            StrDEASM(sl) = Right$("0000" & Hex$(rvai), 8) & ": " & _
+                           DumpStr & Space$(22 - Len(DumpStr)) & _
+                           InstructStr
+'       Else
+'        Stop
+        End If
     
-        If ((j = 385) Or (j = 386)) And StopAtRET Then
-            'instruction RET scanné!
+        'If ((j = 385) Or (j = 386)) And StopAtRET Then
+        If ((j = 385) Or (j = 394)) And StopAtRET Then
+            'instruction LEAVE scanné!
             Exit Do
         End If
     
@@ -182,15 +487,18 @@ End If
 
 End Sub
 
-Private Function GetVASM(StartPos As Long, ByVal iOpCode As Integer) As Long
+Function GetVASM(ByVal StartPos As Long, ByVal iOpCode As Integer) As Long
 'recherche le nom de l'instruction a partir du byte le plus proche (table inversé)
 'renvoi un pointeur dans la table TblASM_OPCODE
 Dim i
 i = StartPos
-If i <= 0 Then
-    GetVASM = 1
-    Exit Function
-End If
+    
+    'fix
+    If i = 0 Or i = 329 Then
+        GetVASM = 329
+  '      Stop
+        Exit Function
+    End If
     
     Do While i <= TblASM_len
         If TblASM_OPCODE(i).OpCodeLen = 1 Then
@@ -202,24 +510,68 @@ End If
                 Exit Do
             End If
         End If
+        If TblASM_OPCODE(i).Flag1 = 30 Or TblASM_OPCODE(i).Flag1 = 31 Or TblASM_OPCODE(i).Flag1 = 32 Then
+            Exit Do
+        End If
     i = i + 1
     Loop
-    GetVASM = i
+    
+    'traçage des instructions ASM mal lu
+    If i <= TblASM_len Then
+        GetVASM = i
+    Else
+        GetVASM = StartPos
+        'Debug.Print "! " & StartPos & " : " & Hex(iOpCode And 255) & "h"
+    End If
     
 End Function
 
-Private Function CodeToStr(inCode() As Byte, inOPidx As Long, inRVA As Long, outLU As Long) As String
+Function CodeToStr(inCode() As Byte, ByVal inOPidx As Long, ByVal inRVA As Long, outLU As Long, ByRef outJVA As Long) As String
 'texte de l'instruction désassemblé
 Dim i, j, k, ol
 Dim ib, iw, id
+Dim sibs As Byte, sibi As Byte
 Dim dFlg, eFlg
 Dim bMod As Byte, bOP As Byte, bRM As Byte, bReg As Byte
-Dim sReg As String
+Dim sReg As String, sIdb As String
+Dim ModFlag1 As Boolean, ModFlag2 As Boolean
+Static PrefixStr As String
+Static PrefixOp As Integer
+outLU = 0
+SubDeb:
+
+    If TblASM_OPCODE(inOPidx).Flag3 >= 1 And TblASM_OPCODE(inOPidx).Flag3 <= 7 Then
+        '/digit, le bOP indique la vraie opération
+        ModRM inCode(TblASM_OPCODE(inOPidx).OpCodeLen + 1), bMod, bOP, bReg
+        If bMod = 3 Or bMod = 2 Then
+            'pire que /digit, c'est probablement un opcode sur 2 octets
+            For i = 1 To (TblASM_len - inOPidx)
+                If CLng(TblASM_OPCODE(inOPidx + i).FullOpCode) + 65536 = (CLng(inCode(1)) Or CLng(inCode(2)) * 256) Then
+                    inOPidx = inOPidx + i
+                    GoTo GereOpCode
+                End If
+            Next i
+        End If
+        'opcode sur 1 octet avec /digit comme selecteur
+        For i = 0 To 7
+            If bOP = (TblASM_OPCODE(inOPidx + i).Flag3 - 1) Then
+                inOPidx = inOPidx + i
+                Exit For
+            End If
+        Next i
+        'conditions exceptionnelles - fix -
+        If inOPidx = 640 Then inOPidx = 646
+        
+    End If
+
+GereOpCode:
 With TblASM_OPCODE(inOPidx)
+'    If inOPidx = 324 Then Stop
 
     ol = .OpCodeLen
     outLU = ol
     CodeToStr = .sInstruct
+    'If .FullOpCode = &H83 Then Stop
 
     dFlg = .Flag1 Or .Flag2 Or .Flag3 Or .Flag4
     eFlg = .Flag5 Or .Flag6 Or .Flag7 Or .Flag8
@@ -229,6 +581,29 @@ With TblASM_OPCODE(inOPidx)
         Exit Function
     ElseIf dFlg > 0 Then
         'flag uniquement post : pas de ModRM byte
+    End If
+    
+    'cas specialement optimisé pour VB : CALL via E8h ou JMP via E9h
+    If .Flag4 = 24 And .Flag5 = 36 Then
+        'rel32
+        outLU = ol + 4
+        id = b4Long(inCode(), ol + 1)
+        'If id < 0 Then
+        '    id = 2 ^ 32 - CDbl((CDbl(inCode(ol + 4)) * &H1000000) + (CDbl(inCode(ol + 3)) * &H10000) + (CDbl(inCode(ol + 2)) * &H100) + CDbl(inCode(ol + 1)))
+        'End If
+        id = id + inRVA + outLU
+        CodeToStr = .sInstruct & Right$("00000000" & Hex$(id), 8)
+        outJVA = id
+        Exit Function
+    End If
+    
+    'prefix
+    If .Flag8 = 100 Then
+        PrefixStr = .sInstruct
+        PrefixOp = .FullOpCode
+        CodeToStr = ""
+        outLU = 1
+        Exit Function
     End If
     
     If .Flag1 >= 30 And .Flag1 <= 32 Then
@@ -246,23 +621,289 @@ With TblASM_OPCODE(inOPidx)
     End If
     
     
+    'octet ModR/M
     If .Flag3 > 0 And .Flag3 < 18 Then
         outLU = outLU + 1
         'octet ModR/M utilisé
+        bMod = 0: bOP = 0: bReg = 0
         ModRM inCode(ol + 1), bMod, bOP, bReg
+        If .Flag3 >= 1 And .Flag3 <= 7 Then
+            '/digit !
+            bOP = bReg
+            
+        End If
+        sIdb = ""
         Select Case bMod
         Case 0
-
+            'fix instruction FF15h (qui croise FF57h)
+            If .FullOpCode = 255 And (.Flag3 = 3 Or .Flag3 = 5) Then
+                GoTo FixFF15
+            End If
+            'fix instruction 8B3Dh
+            If .FullOpCode = 139 And bReg = 5 Then
+                CodeToStr = CodeToStr & TblASM_REG(bOP).r32 & ", "
+                GoTo FixFF15
+            End If
+            'fix instruction D9 FSTP : lorsque bmod = 0, il faut tout de même prendre l'octet d'après
+            If .FullOpCode = 217 And .Flag3 = 4 Then
+                outLU = outLU + 1
+            End If
+            'fix instruction D8 FSUB : lorsque bmod = 0 on prend les 4 octets d'apres
+            If .FullOpCode = 216 And .Flag3 = 5 Then
+                sReg = "dword ptr [" & Right$("00000000" & Hex$(b4Long(inCode(), outLU + 1)), 8) & "]"
+                outLU = outLU + 4
+                CodeToStr = .sInstruct & sReg
+                Exit Function
+            End If
         Case 1
+            If bReg = 4 Then
+                'très rarement utilisé par VB, sauf pour l'appel aux subs (dans ce cas : =24h soit "direct")
+                Call SIB(inCode(ol + 2), sibs, sibi, bReg)
+                If inCode(ol + 2) = 36 Then
+                    ol = ol + 1
+                    outLU = outLU + 1
+                End If
+            End If
+            
             ib = inCode(ol + 2)
             outLU = outLU + 1
+            If (ib > 127) Then
+                ib = ((Not ib) + 1)
+                sIdb = "-"
+            Else
+                sIdb = "+"
+            End If
+            sIdb = sIdb & Right$("00" & Hex$(ib), 2)
         Case 2
             id = b4Long(inCode(), ol + 2)
+            If id < 0 Then
+                id = (Not id) + 1
+                sIdb = "-" & Right$("00000000" & Hex$(id), 8)
+            Else
+                sIdb = "+" & Right$("00000000" & Hex$(id), 8)
+            End If
             outLU = outLU + 4
+            outJVA = id
         Case 3
+            'correctif...
+            If .Flag5 <= 20 Then
+                .Flag5 = .Flag5 + 20
+                ModFlag1 = True
+            End If
+            If .Flag6 <= 20 And .Flag6 > 0 Then
+                .Flag6 = .Flag6 + 20
+                ModFlag2 = True
+            End If
+        End Select
+        
+        Select Case .Flag4
+        Case 28
+        End Select
+        
+        'prefix opsize + vb fix (travail sur 16bits / word)
+        If PrefixOp = &H66 Then
+            If .Flag5 = 40 Then .Flag5 = 39
+            If .Flag5 = 20 Then .Flag5 = 19
+            If .Flag6 = 44 Then .Flag6 = 43
+        End If
+    
+        Select Case .Flag5
+        Case 18
+            sReg = "byte ptr [" & TblASM_REG(bReg).r8 & sIdb & "]"
+        Case 19
+            sReg = "word ptr [" & TblASM_REG(bReg).r16 & sIdb & "]"
+        Case 20, 128
+            sReg = "dword ptr [" & TblASM_REG(bReg).r32 & sIdb & "]"
+            
+            If PrefixOp = &H64 Then
+                sReg = "dword ptr FS:[" & Right$("00000000" & Hex$(b4Long(inCode(), outLU + 1)), 8) & "]"
+                outLU = outLU + 4
+            End If
+            
+        Case 38
+            If .Flag6 = 0 Then
+                sReg = TblASM_REG(bReg).r8
+            Else
+                sReg = TblASM_REG(bOP).r8
+            End If
+        Case 39
+            sReg = TblASM_REG(bOP).r16
+        Case 40
+            sReg = TblASM_REG(bOP).r32
+        Case 44, 61
+FixFF15:
+            outJVA = b4Long(inCode(), outLU + 1)
+            sReg = "dword ptr [" & Right$("00000000" & Hex$(outJVA), 8) & "]"
+            outLU = outLU + 4
+            CodeToStr = CodeToStr & sReg
+            
+            GoTo FinModRM
+        Case 128
+            sReg = "dword ptr [" & TblASM_REG(bReg).r32 & sIdb & "]"
+        Case 129
+            sReg = "qword ptr [" & TblASM_REG(bReg).r32 & sIdb & "]"
+            If outLU = 2 Then outLU = 3 'fix sauvage
+        Case 133
+            sReg = "qword ptr [" & TblASM_REG(bReg).r32 & sIdb & "]"
+            If outLU = 2 Then outLU = 3 'fix sauvage
+        End Select
+        CodeToStr = CodeToStr & sReg
+        sReg = ""
+        
+        
+        Select Case .Flag6
+        Case 0
+            sReg = ""
+        Case 18
+            sReg = "byte ptr [" & TblASM_REG(bReg).r8 & sIdb & "]"
+        Case 19
+            sReg = "word ptr [" & TblASM_REG(bReg).r16 & sIdb & "]"
+        Case 20
+            sReg = "dword ptr [" & TblASM_REG(bReg).r32 & sIdb & "]"
+        Case 38
+            sReg = TblASM_REG(bOP).r8
+        Case 39
+            sReg = TblASM_REG(bOP).r16
+        Case 40
+            If .Flag5 = 40 Then
+                sReg = TblASM_REG(bReg).r32
+            Else
+                sReg = TblASM_REG(bOP).r32
+            End If
+            
+        Case 42, 22 'imm8
+            'CodeToStr = CodeToStr & " " & inCode(outLU + 1)
+            sReg = inCode(outLU + 1)
+            outLU = outLU + 1
+        Case 43 'imm16
+            'iw = &HFFFF And (CLng(inCode(outLU + 1)) Or CLng(inCode(outLU + 2)) * 256)
+            'If iw > 32767 Then iw = -(32768 - iw + 32768)
+            iw = b2Int(inCode(), outLU + 1)
+            sReg = iw
+            outLU = outLU + 2
+        Case 44 'imm32
+            outJVA = b4Long(inCode(), outLU + 1)
+            sReg = Right$("00000000" & Hex$(outJVA), 8)
+            outLU = outLU + 4
+        Case 50 'm
+            sReg = "dword ptr [" & TblASM_REG(bReg).r32 & sIdb & "]"
+            'outLU = outLU + 1
+        Case Else
+        End Select
+        If sReg <> "" Then CodeToStr = CodeToStr & ", " & sReg
+        
+        'compense prefix
+        If PrefixOp = &H66 Then
+            If .Flag5 = 39 Then .Flag5 = 40
+            If .Flag5 = 19 Then .Flag5 = 20
+            If .Flag6 = 43 Then .Flag6 = 44
+        End If
+        
+        If ModFlag1 = True Then
+            .Flag5 = .Flag5 - 20
+            ModFlag1 = False
+        End If
+        If ModFlag2 = True Then
+            .Flag6 = .Flag6 - 20
+            ModFlag2 = False
+        End If
+        
+    End If 'fin ModR/M
+    
+FinModRM:
+    
+    'prefix opsize + vb fix
+    If PrefixOp = &H66 Then
+        If .Flag5 = 40 Then .Flag5 = 39
+        If .Flag5 = 20 Then .Flag5 = 19
+    End If
+    
+    Select Case .Flag5
+    Case 34 'rel8
+        outLU = outLU + 1
+        If inCode(2) <= 127 Then
+            CodeToStr = CodeToStr & Right$("00000000" & Hex$(inRVA + inCode(2) + outLU), 8)
+        Else
+            CodeToStr = CodeToStr & Right$("00000000" & Hex$(inRVA - (inCode(2) - 128) + outLU), 8)
+        End If
+    Case 42 'imm8
+        CodeToStr = CodeToStr & " " & inCode(2)
+        outLU = outLU + 1
+    Case 43 'imm16
+        CodeToStr = CodeToStr & " " & (CLng(inCode(2)) Or CLng(inCode(3)) * 256)
+        outLU = outLU + 2
+    Case 44 'imm32
+        'tweak VB : si on est ici via l'instruction PUSH de 68h, alors c'est une adresse
+        'If .FullOpCode <> &H68 Then
+        '    CodeToStr = CodeToStr & " " & b4Long(inCode(), 2)
+        'Else
+            outJVA = b4Long(inCode(), 2)
+            CodeToStr = CodeToStr & " " & Right$("0000000" & Hex$(outJVA), 8)
+        'End If
+        outLU = outLU + 4
+        
+    Case 51 'm8
+        outLU = outLU + 1
+    Case 52 'm16
+        outLU = outLU + 2
+    Case 53 'm32
+        outJVA = b4Long(inCode(), outLU + 1)
+        CodeToStr = CodeToStr & " " & Right$("0000000" & Hex$(outJVA), 8)
+        outLU = outLU + 4
+        
+    Case 70 'offs8*
+        outLU = outLU + 1
+        CodeToStr = CodeToStr & "byte ptr " & PrefixStr & "[" & Right$("00" & Hex$(inCode(outLU)), 2) & "]"
+    'Case 71 'offs16* tweak vb6 : c'est toujours 32bits
+    Case 71, 72 'offs32*
+        outJVA = b4Long(inCode(), outLU + 1)
+        CodeToStr = CodeToStr & "dword ptr " & PrefixStr & "[" & Right$("00000000" & Hex$(outJVA), 8) & "]"
+        outLU = outLU + 4
+    End Select
 
+    If Not (.Flag3 > 0 And .Flag3 < 18) Then
+        'quelques rares instructions or ModR/M ont besoin de ca
+        Select Case .Flag6
+        Case 0
+        Case 18, 19, 20, 38, 39, 40
+            'registre : vu par modR/M
+        Case 42 'imm8
+            CodeToStr = CodeToStr & " " & inCode(outLU + 1)
+            outLU = outLU + 1
+        Case 43 'imm16
+            CodeToStr = CodeToStr & " " & b2Int(inCode(), outLU + 1) '(CLng(inCode(2)) Or CLng(inCode(3)) * 256)
+            outLU = outLU + 2
+        Case 44 'imm32
+            outJVA = b4Long(inCode(), outLU + 1)
+            CodeToStr = CodeToStr & " " & Right$("0000000" & Hex$(outJVA), 8)
+            outLU = outLU + 4
+        Case 50
+            'movs,movsd
+        Case 51 'm8
+            outLU = outLU + 1
+        Case 52 'm16
+            outLU = outLU + 2
+        Case 53 'm32
+            outJVA = b4Long(inCode(), outLU + 1)
+            CodeToStr = CodeToStr & " " & Right$("0000000" & Hex$(outJVA), 8)
+            outLU = outLU + 4
+
+        Case Else
+            Stop
         End Select
     End If
+    
+    'fin fix opsize et VB
+    If PrefixOp = &H66 Then
+        If .Flag5 = 39 Then .Flag5 = 40
+        If .Flag5 = 19 Then .Flag5 = 20
+    End If
+
+
+    
+    CodeToStr = CodeToStr & .sEnd
+    PrefixStr = ""
+    PrefixOp = 0
 
 End With
 End Function
@@ -281,31 +922,51 @@ Private Sub ModRM(inModRM As Byte, outMod As Byte, outReg As Byte, outRM As Byte
     'contient le numéro du registre rb ou rd (r/m8, r/m32)
     
 End Sub
+Private Sub SIB(ByVal SIB As Byte, ByRef bScale As Byte, ByRef bIndex As Byte, ByRef bBase As Byte)
+'décode le byte SIB
+'http://www.sandpile.org/ia32/opc_sib.htm
+    bScale = SIB / 64
+    '0=reg*1 ; 1=reg*2 ; 2=reg*4 ; 3=reg*8
+    bIndex = (SIB / 8) And 7
+    '0=eax; 1=ecx; 2=edx; 3=ebx; 4=(direct); 5=ebp; 6=esi; 7=edi
+    bBase = SIB And 7
+    '0=eax; 1=ecx; 2=edx; 3=ebx; 4=esp; 5=(ModR/M mod); 6=esi; 7=edi
+End Sub
 
-Private Function bArrayHexStr(inB() As Byte, ByVal lTC As Long) As String
+Function bArrayHexStr(inB() As Byte, ByVal lTC As Long) As String
 'converti un tableau de bytes en string hexadécimale
 Dim i As Long
 bArrayHexStr = Space$(lTC * 2)
 i = 1
 
     Do While i <= lTC
-        Mid$(bArrayHexStr, i, 2) = Right$("0" & Hex$(inB(i)), 2)
+        Mid$(bArrayHexStr, (i - 1) * 2 + 1, 2) = Right$("00" & Hex$(inB(i)), 2)
         i = i + 1
     Loop
     
 End Function
 
-Private Function b4Long(inB() As Byte, Ofs As Long) As Long
+Private Function b4Long(inB() As Byte, ofs As Long) As Long
 'renvoi une variable Long a partir de 4 valeur d'un tableau de byte
-    b4Long = inB(Ofs)
-    b4Long = b4Long Or CLng(inB(Ofs + 1)) * 256
-    b4Long = b4Long Or CLng(inB(Ofs + 2)) * 65536
+    b4Long = inB(ofs)
+    b4Long = b4Long Or CLng(inB(ofs + 1)) * 256
+    b4Long = b4Long Or CLng(inB(ofs + 2)) * 65536
     
-    If inB(Ofs + 3) < 128 Then
-        b4Long = b4Long Or CLng(inB(Ofs + 3)) * 16777216
+    If inB(ofs + 3) < 128 Then
+        b4Long = b4Long Or CLng(inB(ofs + 3)) * 16777216
     Else  'putain de variable signé
-        b4Long = (b4Long Or (CLng(inB(Ofs + 3) - 128) * 16777216)) Or &H80000000
+        b4Long = (b4Long Or (CLng(inB(ofs + 3) - 128) * 16777216)) Or &H80000000
     End If
+    
+End Function
+
+Private Function b2Int(inB() As Byte, ofs As Long) As Integer
+'renvoi un integer à partir de 2 bytes
+Dim lTmp As Long
+
+    lTmp = &HFFFF And (CLng(inB(ofs)) Or CLng(inB(ofs + 1)) * 256)
+    If lTmp > 32767 Then lTmp = -(32768 - lTmp + 32768)
+    b2Int = lTmp
     
 End Function
 
@@ -324,6 +985,7 @@ End Sub
 Sub Init_unASM()
 'initialisation du désassembleur
 ReDim TblASM_OPCODE(1 To 648)
+TblASM_len = 648
     
     'registres
     TblASM_REG(0).r8 = "AL": TblASM_REG(0).r16 = "AX": TblASM_REG(0).r32 = "EAX"
@@ -367,13 +1029,13 @@ ReDim TblASM_OPCODE(1 To 648)
     TblPtrASM(13) = 14
     AddAOC TblASM_OPCODE(15), &HE, 1, 0, 0, 0, 0, 0, 0, 0, 0, "PUSH CS", ""
     TblPtrASM(14) = 15
-    AddAOC TblASM_OPCODE(16), &HF, 2, 0, 0, 0, 0, 20, 0, 0, 0, "SLDT ", ""
+    AddAOC TblASM_OPCODE(16), &HF, 1, 0, 0, 1, 0, 20, 0, 0, 0, "SLDT ", ""
     TblPtrASM(15) = 16
-    AddAOC TblASM_OPCODE(17), &HF, 2, 0, 0, 2, 0, 19, 0, 0, 0, "STR ", ""
-    AddAOC TblASM_OPCODE(18), &HF, 2, 0, 0, 3, 0, 19, 0, 0, 0, "LLDT ", ""
-    AddAOC TblASM_OPCODE(19), &HF, 2, 0, 0, 4, 0, 19, 0, 0, 0, "LTR ", ""
-    AddAOC TblASM_OPCODE(20), &HF, 2, 0, 0, 5, 0, 19, 0, 0, 0, "VERR ", ""
-    AddAOC TblASM_OPCODE(21), &HF, 2, 0, 0, 6, 0, 19, 0, 0, 0, "VERW ", ""
+    AddAOC TblASM_OPCODE(17), &HF, 1, 0, 0, 2, 0, 19, 0, 0, 0, "STR ", ""
+    AddAOC TblASM_OPCODE(18), &HF, 1, 0, 0, 3, 0, 19, 0, 0, 0, "LLDT ", ""
+    AddAOC TblASM_OPCODE(19), &HF, 1, 0, 0, 4, 0, 19, 0, 0, 0, "LTR ", ""
+    AddAOC TblASM_OPCODE(20), &HF, 1, 0, 0, 5, 0, 19, 0, 0, 0, "VERR ", ""
+    AddAOC TblASM_OPCODE(21), &HF, 1, 0, 0, 6, 0, 19, 0, 0, 0, "VERW ", ""
     AddAOC TblASM_OPCODE(22), &H10F, 2, 0, 0, 0, 0, 50, 0, 0, 0, "SGDT ", ""
     AddAOC TblASM_OPCODE(23), &H10F, 2, 0, 0, 2, 0, 50, 0, 0, 0, "SIDT ", ""
     AddAOC TblASM_OPCODE(24), &H10F, 2, 0, 0, 3, 0, 64, 0, 0, 0, "LGDT ", ""
@@ -600,7 +1262,7 @@ ReDim TblASM_OPCODE(1 To 648)
     TblPtrASM(36) = 224
     AddAOC TblASM_OPCODE(225), &H25, 1, 0, 0, 0, 28, 44, 0, 0, 0, "AND EAX,", ""
     TblPtrASM(37) = 225
-    AddAOC TblASM_OPCODE(226), &H26, 1, 0, 0, 0, 0, 0, 0, 0, 0, "ES:", ""
+    AddAOC TblASM_OPCODE(226), &H26, 1, 0, 0, 0, 0, 0, 0, 0, 100, "ES:", ""
     TblPtrASM(38) = 226
     AddAOC TblASM_OPCODE(227), &H27, 1, 0, 0, 0, 0, 0, 0, 0, 0, "DAA", ""
     TblPtrASM(39) = 227
@@ -616,7 +1278,7 @@ ReDim TblASM_OPCODE(1 To 648)
     TblPtrASM(44) = 232
     AddAOC TblASM_OPCODE(233), &H2D, 1, 0, 0, 0, 28, 44, 0, 0, 0, "SUB EAX,", ""
     TblPtrASM(45) = 233
-    AddAOC TblASM_OPCODE(234), &H2E, 1, 0, 0, 0, 0, 0, 0, 0, 0, "CS:", ""
+    AddAOC TblASM_OPCODE(234), &H2E, 1, 0, 0, 0, 0, 0, 0, 0, 100, "CS:", ""
     TblPtrASM(46) = 234
     AddAOC TblASM_OPCODE(235), &H2F, 1, 0, 0, 0, 0, 0, 0, 0, 0, "DAS", ""
     TblPtrASM(47) = 235
@@ -632,7 +1294,7 @@ ReDim TblASM_OPCODE(1 To 648)
     TblPtrASM(52) = 240
     AddAOC TblASM_OPCODE(241), &H35, 1, 0, 0, 0, 28, 44, 0, 0, 0, "XOR EAX,", ""
     TblPtrASM(53) = 241
-    AddAOC TblASM_OPCODE(242), &H36, 1, 0, 0, 0, 0, 0, 0, 0, 0, "SS:", ""
+    AddAOC TblASM_OPCODE(242), &H36, 1, 0, 0, 0, 0, 0, 0, 0, 100, "SS:", ""
     TblPtrASM(54) = 242
     AddAOC TblASM_OPCODE(243), &H37, 1, 0, 0, 0, 0, 0, 0, 0, 0, "AAA", ""
     TblPtrASM(55) = 243
@@ -648,7 +1310,7 @@ ReDim TblASM_OPCODE(1 To 648)
     TblPtrASM(60) = 248
     AddAOC TblASM_OPCODE(249), &H3D, 1, 0, 0, 0, 28, 44, 0, 0, 0, "CMP EAX,", ""
     TblPtrASM(61) = 249
-    AddAOC TblASM_OPCODE(250), &H3E, 1, 0, 0, 0, 0, 0, 0, 0, 0, "DS:", ""
+    AddAOC TblASM_OPCODE(250), &H3E, 1, 0, 0, 0, 0, 0, 0, 0, 100, "DS:", ""
     TblPtrASM(62) = 250
     AddAOC TblASM_OPCODE(251), &H3F, 1, 0, 0, 0, 0, 0, 0, 0, 0, "AAS", ""
     TblPtrASM(63) = 251
@@ -705,13 +1367,13 @@ Private Sub Init_UnASM_Next()
     TblPtrASM(98) = 258
     AddAOC TblASM_OPCODE(259), &H63, 1, 0, 0, 17, 0, 19, 39, 0, 0, "ARPL ", ""
     TblPtrASM(99) = 259
-    AddAOC TblASM_OPCODE(260), &H64, 1, 0, 0, 0, 0, 0, 0, 0, 0, "FS:", ""
+    AddAOC TblASM_OPCODE(260), &H64, 1, 0, 0, 0, 0, 0, 0, 0, 100, "FS:", ""
     TblPtrASM(100) = 260
-    AddAOC TblASM_OPCODE(261), &H65, 1, 0, 0, 0, 0, 0, 0, 0, 0, "GS:", ""
+    AddAOC TblASM_OPCODE(261), &H65, 1, 0, 0, 0, 0, 0, 0, 0, 100, "GS:", ""
     TblPtrASM(101) = 261
-    AddAOC TblASM_OPCODE(262), &H66, 1, 0, 0, 0, 0, 0, 0, 0, 0, "Ops", ""
+    AddAOC TblASM_OPCODE(262), &H66, 1, 0, 0, 0, 0, 0, 0, 0, 100, "Opsize:", ""
     TblPtrASM(102) = 262
-    AddAOC TblASM_OPCODE(263), &H67, 1, 0, 0, 0, 0, 0, 0, 0, 0, "Add", ""
+    AddAOC TblASM_OPCODE(263), &H67, 1, 0, 0, 0, 0, 0, 0, 0, 100, "Address:", ""
     TblPtrASM(103) = 263
     AddAOC TblASM_OPCODE(264), &H68, 1, 0, 0, 0, 28, 44, 0, 0, 0, "PUSH ", ""
     TblPtrASM(104) = 264
@@ -763,7 +1425,7 @@ Private Sub Init_UnASM_Next()
     TblPtrASM(126) = 288
     AddAOC TblASM_OPCODE(289), &H7F, 1, 0, 0, 0, 22, 34, 0, 0, 0, "JG ", ""
     TblPtrASM(127) = 289
-    AddAOC TblASM_OPCODE(290), &H80, 1, 0, 0, 0, 26, 18, 42, 0, 0, "ADD ", ""
+    AddAOC TblASM_OPCODE(290), &H80, 1, 0, 0, 1, 26, 18, 42, 0, 0, "ADD ", ""
     TblPtrASM(128) = 290
     AddAOC TblASM_OPCODE(291), &H80, 1, 0, 0, 2, 26, 18, 42, 0, 0, "OR ", ""
     AddAOC TblASM_OPCODE(292), &H80, 1, 0, 0, 3, 26, 18, 42, 0, 0, "ADC ", ""
@@ -772,7 +1434,7 @@ Private Sub Init_UnASM_Next()
     AddAOC TblASM_OPCODE(295), &H80, 1, 0, 0, 6, 26, 18, 42, 0, 0, "SUB ", ""
     AddAOC TblASM_OPCODE(296), &H80, 1, 0, 0, 7, 26, 18, 42, 0, 0, "XOR ", ""
     AddAOC TblASM_OPCODE(297), &H80, 1, 0, 0, 8, 26, 18, 42, 0, 0, "CMP ", ""
-    AddAOC TblASM_OPCODE(298), &H81, 1, 0, 0, 0, 28, 20, 44, 0, 0, "ADD ", ""
+    AddAOC TblASM_OPCODE(298), &H81, 1, 0, 0, 1, 28, 20, 44, 0, 0, "ADD ", ""
     TblPtrASM(129) = 298
     AddAOC TblASM_OPCODE(299), &H81, 1, 0, 0, 2, 28, 20, 44, 0, 0, "OR ", ""
     AddAOC TblASM_OPCODE(300), &H81, 1, 0, 0, 3, 28, 20, 44, 0, 0, "ADC ", ""
@@ -781,7 +1443,7 @@ Private Sub Init_UnASM_Next()
     AddAOC TblASM_OPCODE(303), &H81, 1, 0, 0, 6, 28, 20, 44, 0, 0, "SUB ", ""
     AddAOC TblASM_OPCODE(304), &H81, 1, 0, 0, 7, 28, 20, 44, 0, 0, "XOR ", ""
     AddAOC TblASM_OPCODE(305), &H81, 1, 0, 0, 8, 28, 20, 44, 0, 0, "CMP ", ""
-    AddAOC TblASM_OPCODE(306), &H83, 1, 0, 0, 0, 26, 20, 42, 0, 0, "ADD ", ""
+    AddAOC TblASM_OPCODE(306), &H83, 1, 0, 0, 1, 26, 20, 42, 0, 0, "ADD ", ""
     TblPtrASM(131) = 306
     AddAOC TblASM_OPCODE(307), &H83, 1, 0, 0, 2, 26, 20, 42, 0, 0, "OR ", ""
     AddAOC TblASM_OPCODE(308), &H83, 1, 0, 0, 3, 26, 20, 42, 0, 0, "ADC ", ""
@@ -792,7 +1454,9 @@ Private Sub Init_UnASM_Next()
     AddAOC TblASM_OPCODE(313), &H83, 1, 0, 0, 8, 26, 20, 42, 0, 0, "CMP ", ""
     AddAOC TblASM_OPCODE(314), &H84, 1, 0, 0, 17, 0, 18, 38, 0, 0, "TEST ", ""
     TblPtrASM(132) = 314
-    AddAOC TblASM_OPCODE(315), &H85, 1, 0, 0, 17, 0, 19, 39, 0, 0, "TEST ", ""
+    'AddAOC TblASM_OPCODE(315), &H85, 1, 0, 0, 17, 0, 19, 39, 0, 0, "TEST ", ""
+    'tweak VB : utilise la version 32bits seulement
+    AddAOC TblASM_OPCODE(315), &H85, 1, 0, 0, 17, 0, 20, 40, 0, 0, "TEST ", ""
     TblPtrASM(133) = 315
     AddAOC TblASM_OPCODE(316), &H85, 1, 0, 0, 17, 0, 20, 40, 0, 0, "TEST ", ""
     AddAOC TblASM_OPCODE(317), &H86, 1, 0, 0, 17, 0, 18, 38, 0, 0, "XCHG ", ""
@@ -819,6 +1483,8 @@ Private Sub Init_UnASM_Next()
     TblPtrASM(143) = 328
     AddAOC TblASM_OPCODE(329), &H90, 1, 0, 0, 0, 0, 0, 0, 0, 0, "NOP", ""
     TblPtrASM(144) = 329
+    'fix
+    TblPtrASM(130) = 329
     
     'equivoque ???
     AddAOC TblASM_OPCODE(330), &H90, 1, 32, 0, 0, 0, 40, 0, 0, 0, "XCHG EAX,", ""
@@ -857,19 +1523,20 @@ Private Sub Init_UnASM_Next()
     TblPtrASM(158) = 347
     AddAOC TblASM_OPCODE(348), &H9F, 1, 0, 0, 0, 0, 0, 0, 0, 0, "LAHF", ""
     TblPtrASM(159) = 348
-    AddAOC TblASM_OPCODE(349), &HA0, 1, 0, 0, 0, 0, 0, 0, 0, 0, "MOV AL, ", ""
+    AddAOC TblASM_OPCODE(349), &HA0, 1, 0, 0, 0, 0, 70, 0, 0, 0, "MOV AL, ", ""
     TblPtrASM(160) = 349
-    AddAOC TblASM_OPCODE(350), &HA1, 1, 0, 0, 0, 0, 0, 0, 0, 0, "MOV AX, ", ""
+    AddAOC TblASM_OPCODE(350), &HA1, 1, 0, 0, 0, 0, 71, 0, 0, 0, "MOV AX, ", ""
     TblPtrASM(161) = 350
-    AddAOC TblASM_OPCODE(351), &HA1, 1, 0, 0, 0, 0, 0, 0, 0, 0, "MOV EAX, ", ""
-    AddAOC TblASM_OPCODE(352), &HA2, 1, 0, 0, 0, 0, 0, 0, 0, 0, "MOV ", ",AL"
+    AddAOC TblASM_OPCODE(351), &HA1, 1, 0, 0, 0, 0, 72, 0, 0, 0, "MOV EAX, ", ""
+    AddAOC TblASM_OPCODE(352), &HA2, 1, 0, 0, 0, 0, 70, 0, 0, 0, "MOV ", ",AL"
     TblPtrASM(162) = 352
-    AddAOC TblASM_OPCODE(353), &HA3, 1, 0, 0, 0, 0, 0, 0, 0, 0, "MOV ", ",AX"
+    AddAOC TblASM_OPCODE(353), &HA3, 1, 0, 0, 0, 0, 71, 0, 0, 0, "MOV ", ",AX"
     TblPtrASM(163) = 353
-    AddAOC TblASM_OPCODE(354), &HA3, 1, 0, 0, 0, 0, 0, 0, 0, 0, "MOV ", ",EAX"
+    AddAOC TblASM_OPCODE(354), &HA3, 1, 0, 0, 0, 0, 72, 0, 0, 0, "MOV ", ",EAX"
     AddAOC TblASM_OPCODE(355), &HA4, 1, 0, 0, 0, 0, 51, 51, 0, 0, "MOVS ", ""
     TblPtrASM(164) = 355
-    AddAOC TblASM_OPCODE(356), &HA5, 1, 0, 0, 0, 0, 53, 53, 0, 0, "MOVS ", ""
+    'tweak VB6 : A5h correspond à la version 32bits de MOVS, soit MOVSD
+    AddAOC TblASM_OPCODE(356), &HA5, 1, 0, 0, 0, 0, 0, 0, 0, 0, "MOVSD", ""
     TblPtrASM(165) = 356
     AddAOC TblASM_OPCODE(357), &HA6, 1, 0, 0, 0, 0, 0, 0, 0, 0, "CMPSB", ""
     TblPtrASM(166) = 357
@@ -909,7 +1576,7 @@ Private Sub Init_UnASM_Next()
     TblPtrASM(189) = 368
     TblPtrASM(190) = 368
     TblPtrASM(191) = 368
-    AddAOC TblASM_OPCODE(369), &HC0, 1, 0, 0, 0, 26, 18, 42, 0, 0, "ROL ", ""
+    AddAOC TblASM_OPCODE(369), &HC0, 1, 0, 0, 1, 26, 18, 42, 0, 0, "ROL ", ""
     TblPtrASM(192) = 369
     AddAOC TblASM_OPCODE(370), &HC0, 1, 0, 0, 2, 26, 18, 42, 0, 0, "ROR ", ""
     AddAOC TblASM_OPCODE(371), &HC0, 1, 0, 0, 3, 26, 18, 42, 0, 0, "RCL ", ""
@@ -918,7 +1585,7 @@ Private Sub Init_UnASM_Next()
     AddAOC TblASM_OPCODE(374), &HC0, 1, 0, 0, 5, 26, 18, 42, 0, 0, "SHL ", ""
     AddAOC TblASM_OPCODE(375), &HC0, 1, 0, 0, 6, 26, 18, 42, 0, 0, "SHR ", ""
     AddAOC TblASM_OPCODE(376), &HC0, 1, 0, 0, 8, 26, 18, 42, 0, 0, "SAR ", ""
-    AddAOC TblASM_OPCODE(377), &HC1, 1, 0, 0, 0, 26, 20, 42, 0, 0, "ROL ", ""
+    AddAOC TblASM_OPCODE(377), &HC1, 1, 0, 0, 1, 26, 20, 42, 0, 0, "ROL ", ""
     TblPtrASM(193) = 377
     AddAOC TblASM_OPCODE(378), &HC1, 1, 0, 0, 2, 26, 20, 42, 0, 0, "ROR ", ""
     AddAOC TblASM_OPCODE(379), &HC1, 1, 0, 0, 3, 26, 20, 42, 0, 0, "RCL ", ""
@@ -935,9 +1602,9 @@ Private Sub Init_UnASM_Next()
     TblPtrASM(196) = 387
     AddAOC TblASM_OPCODE(388), &HC5, 1, 0, 0, 17, 0, 40, 61, 0, 0, "LDS ", ""
     TblPtrASM(197) = 388
-    AddAOC TblASM_OPCODE(389), &HC6, 1, 0, 0, 0, 26, 18, 42, 0, 0, "MOV ", ""
+    AddAOC TblASM_OPCODE(389), &HC6, 1, 0, 0, 1, 26, 18, 42, 0, 0, "MOV ", ""
     TblPtrASM(198) = 389
-    AddAOC TblASM_OPCODE(390), &HC7, 1, 0, 0, 0, 28, 20, 44, 0, 0, "MOV ", ""
+    AddAOC TblASM_OPCODE(390), &HC7, 1, 0, 0, 1, 28, 20, 44, 0, 0, "MOV ", ""
     TblPtrASM(199) = 390
     AddAOC TblASM_OPCODE(391), &HC8, 1, 0, 0, 27, 0, 43, 0, 0, 0, "ENTER ", ",0"
     TblPtrASM(200) = 391
@@ -957,7 +1624,7 @@ Private Sub Init_UnASM_Next()
     TblPtrASM(206) = 399
     AddAOC TblASM_OPCODE(400), &HCF, 1, 0, 0, 0, 0, 0, 0, 0, 0, "IRETD", ""
     TblPtrASM(207) = 400
-    AddAOC TblASM_OPCODE(401), &HD0, 1, 0, 0, 0, 0, 18, 0, 0, 0, "ROL ", ",1"
+    AddAOC TblASM_OPCODE(401), &HD0, 1, 0, 0, 1, 0, 18, 0, 0, 0, "ROL ", ",1"
     TblPtrASM(208) = 401
     AddAOC TblASM_OPCODE(402), &HD0, 1, 0, 0, 2, 0, 18, 0, 0, 0, "ROR ", ",1"
     AddAOC TblASM_OPCODE(403), &HD0, 1, 0, 0, 3, 0, 18, 0, 0, 0, "RCL ", ",1"
@@ -966,7 +1633,7 @@ Private Sub Init_UnASM_Next()
     AddAOC TblASM_OPCODE(406), &HD0, 1, 0, 0, 5, 0, 18, 0, 0, 0, "SHL ", ",1"
     AddAOC TblASM_OPCODE(407), &HD0, 1, 0, 0, 6, 0, 18, 0, 0, 0, "SHR ", ",1"
     AddAOC TblASM_OPCODE(408), &HD0, 1, 0, 0, 8, 0, 18, 0, 0, 0, "SAR ", ",1"
-    AddAOC TblASM_OPCODE(409), &HD1, 1, 0, 0, 0, 0, 20, 0, 0, 0, "ROL ", ",1"
+    AddAOC TblASM_OPCODE(409), &HD1, 1, 0, 0, 1, 0, 20, 0, 0, 0, "ROL ", ",1"
     TblPtrASM(209) = 409
     AddAOC TblASM_OPCODE(410), &HD1, 1, 0, 0, 2, 0, 20, 0, 0, 0, "ROR ", ",1"
     AddAOC TblASM_OPCODE(411), &HD1, 1, 0, 0, 3, 0, 20, 0, 0, 0, "RCL ", ",1"
@@ -975,7 +1642,7 @@ Private Sub Init_UnASM_Next()
     AddAOC TblASM_OPCODE(414), &HD1, 1, 0, 0, 5, 0, 20, 0, 0, 0, "SHL ", ",1"
     AddAOC TblASM_OPCODE(415), &HD1, 1, 0, 0, 6, 0, 20, 0, 0, 0, "SHR ", ",1"
     AddAOC TblASM_OPCODE(416), &HD1, 1, 0, 0, 8, 0, 20, 0, 0, 0, "SAR ", ",1"
-    AddAOC TblASM_OPCODE(417), &HD2, 1, 0, 0, 0, 0, 18, 0, 0, 0, "ROL ", ",CL"
+    AddAOC TblASM_OPCODE(417), &HD2, 1, 0, 0, 1, 0, 18, 0, 0, 0, "ROL ", ",CL"
     TblPtrASM(210) = 417
     AddAOC TblASM_OPCODE(418), &HD2, 1, 0, 0, 2, 0, 18, 0, 0, 0, "ROR ", ",CL"
     AddAOC TblASM_OPCODE(419), &HD2, 1, 0, 0, 3, 0, 18, 0, 0, 0, "RCL ", ",CL"
@@ -984,7 +1651,7 @@ Private Sub Init_UnASM_Next()
     AddAOC TblASM_OPCODE(422), &HD2, 1, 0, 0, 5, 0, 18, 0, 0, 0, "SHL ", ",CL"
     AddAOC TblASM_OPCODE(423), &HD2, 1, 0, 0, 6, 0, 18, 0, 0, 0, "SHR ", ",CL"
     AddAOC TblASM_OPCODE(424), &HD2, 1, 0, 0, 8, 0, 18, 0, 0, 0, "SAR ", ",CL"
-    AddAOC TblASM_OPCODE(425), &HD3, 1, 0, 0, 0, 0, 20, 0, 0, 0, "ROL ", ",CL"
+    AddAOC TblASM_OPCODE(425), &HD3, 1, 0, 0, 1, 0, 20, 0, 0, 0, "ROL ", ",CL"
     TblPtrASM(211) = 425
     AddAOC TblASM_OPCODE(426), &HD3, 1, 0, 0, 2, 0, 20, 0, 0, 0, "ROR ", ",CL"
     AddAOC TblASM_OPCODE(427), &HD3, 1, 0, 0, 3, 0, 20, 0, 0, 0, "RCL ", ",CL"
@@ -1001,9 +1668,9 @@ Private Sub Init_UnASM_Next()
     TblPtrASM(214) = 435
     AddAOC TblASM_OPCODE(436), &HD7, 1, 0, 0, 0, 0, 51, 0, 0, 0, "XLAT ", ""
     TblPtrASM(215) = 436
-    AddAOC TblASM_OPCODE(437), &HD8, 1, 0, 0, 0, 0, 128, 0, 0, 0, "FADD ", ""
+    AddAOC TblASM_OPCODE(437), &HD8, 1, 0, 0, 1, 0, 128, 0, 0, 0, "FADD ", ""
     TblPtrASM(216) = 437
-    AddAOC TblASM_OPCODE(438), &HD8, 1, 0, 0, 2, 0, 128, 0, 0, 0, "FMUL ", ""
+    AddAOC TblASM_OPCODE(438), &HD8, 1, 0, 0, 2, 0, 128, 44, 0, 0, "FMUL ", ""
     AddAOC TblASM_OPCODE(439), &HD8, 1, 0, 0, 3, 0, 128, 0, 0, 0, "FCOM ", ""
     AddAOC TblASM_OPCODE(440), &HD8, 1, 0, 0, 4, 0, 128, 0, 0, 0, "FCOMP ", ""
     AddAOC TblASM_OPCODE(441), &HD8, 1, 0, 0, 5, 0, 128, 0, 0, 0, "FSUB ", ""
@@ -1020,7 +1687,7 @@ Private Sub Init_UnASM_Next()
     AddAOC TblASM_OPCODE(452), &HE8D8, 2, 0, 160, 0, 0, 0, 0, 0, 0, "FSUBR ST(0),ST(", ")"
     AddAOC TblASM_OPCODE(453), &HF0D8, 2, 0, 160, 0, 0, 0, 0, 0, 0, "FDIV ST(0),ST(", ")"
     AddAOC TblASM_OPCODE(454), &HF8D8, 2, 0, 160, 0, 0, 0, 0, 0, 0, "FDIVR ST(0),ST(", ")"
-    AddAOC TblASM_OPCODE(455), &HD9, 1, 0, 0, 0, 0, 128, 0, 0, 0, "FLD ", ""
+    AddAOC TblASM_OPCODE(455), &HD9, 1, 0, 0, 1, 0, 128, 0, 0, 0, "FLD ", ""
     TblPtrASM(217) = 455
     AddAOC TblASM_OPCODE(456), &HD9, 1, 0, 0, 3, 0, 128, 0, 0, 0, "FST ", ""
     AddAOC TblASM_OPCODE(457), &HD9, 1, 0, 0, 4, 0, 128, 0, 0, 0, "FSTP ", ""
@@ -1059,7 +1726,7 @@ Private Sub Init_UnASM_Next()
     AddAOC TblASM_OPCODE(490), &HFDD9, 2, 0, 0, 0, 0, 0, 0, 0, 0, "FSCALE", ""
     AddAOC TblASM_OPCODE(491), &HFED9, 2, 0, 0, 0, 0, 0, 0, 0, 0, "FSIN", ""
     AddAOC TblASM_OPCODE(492), &HFFD9, 2, 0, 0, 0, 0, 0, 0, 0, 0, "FCOS", ""
-    AddAOC TblASM_OPCODE(493), &HDA, 1, 0, 0, 0, 0, 133, 0, 0, 0, "FIADD ", ""
+    AddAOC TblASM_OPCODE(493), &HDA, 1, 0, 0, 1, 0, 133, 0, 0, 0, "FIADD ", ""
     TblPtrASM(218) = 493
     AddAOC TblASM_OPCODE(494), &HDA, 1, 0, 0, 2, 0, 133, 0, 0, 0, "FIMUL ", ""
     AddAOC TblASM_OPCODE(495), &HDA, 1, 0, 0, 3, 0, 133, 0, 0, 0, "FICOM ", ""
@@ -1073,7 +1740,7 @@ Private Sub Init_UnASM_Next()
     AddAOC TblASM_OPCODE(503), &HD0DA, 2, 0, 160, 0, 0, 0, 0, 0, 0, "FCMOVBE ST(0),ST(", ")"
     AddAOC TblASM_OPCODE(504), &HD8DA, 2, 0, 160, 0, 0, 0, 0, 0, 0, "FCMOVU ST(0),ST(", ")"
     AddAOC TblASM_OPCODE(505), &HE9DA, 2, 0, 0, 0, 0, 0, 0, 0, 0, "FUCOMPP", ""
-    AddAOC TblASM_OPCODE(506), &HDB, 1, 0, 0, 0, 0, 133, 0, 0, 0, "FILD ", ""
+    AddAOC TblASM_OPCODE(506), &HDB, 1, 0, 0, 1, 0, 133, 0, 0, 0, "FILD ", ""
     TblPtrASM(219) = 506
     AddAOC TblASM_OPCODE(507), &HDB, 1, 0, 0, 3, 0, 133, 0, 0, 0, "FIST ", ""
     AddAOC TblASM_OPCODE(508), &HDB, 1, 0, 0, 4, 0, 133, 0, 0, 0, "FISTP ", ""
@@ -1083,18 +1750,18 @@ Private Sub Init_UnASM_Next()
     AddAOC TblASM_OPCODE(512), &HC8DB, 2, 0, 160, 0, 0, 0, 0, 0, 0, "FCMOVNE ST(0),ST(", ")"
     AddAOC TblASM_OPCODE(513), &HD0DB, 2, 0, 160, 0, 0, 0, 0, 0, 0, "FCMOVNBE ST(0),ST(", ")"
     AddAOC TblASM_OPCODE(514), &HD8DB, 2, 0, 160, 0, 0, 0, 0, 0, 0, "FCMOVNU ST(0),ST(", ")"
-    AddAOC TblASM_OPCODE(515), &HE2DB, 2, 0, 0, 0, 0, 0, 0, 0, 0, "FNCLEX", ""
+    AddAOC TblASM_OPCODE(515), &HE2DB, 2, 0, 0, 0, 0, 0, 0, 0, 0, "FCLEX", ""
     AddAOC TblASM_OPCODE(516), &HE3DB, 2, 0, 0, 0, 0, 0, 0, 0, 0, "FNINIT", ""
     AddAOC TblASM_OPCODE(517), &HE8DB, 2, 0, 160, 0, 0, 0, 0, 0, 0, "FUCOMI ST,ST(", ""
     AddAOC TblASM_OPCODE(518), &HF0DB, 2, 0, 160, 0, 0, 0, 0, 0, 0, "FCOMI ST,ST(", ""
-    AddAOC TblASM_OPCODE(519), &HDC, 1, 0, 0, 0, 0, 129, 0, 0, 0, "FADD ", ""
+    AddAOC TblASM_OPCODE(519), &HDC, 1, 0, 0, 1, 0, 129, 0, 0, 0, "FADD ", ""
     TblPtrASM(220) = 519
     AddAOC TblASM_OPCODE(520), &HDC, 1, 0, 0, 2, 0, 129, 0, 0, 0, "FMUL ", ""
     AddAOC TblASM_OPCODE(521), &HDC, 1, 0, 0, 3, 0, 129, 0, 0, 0, "FCOM ", ""
     AddAOC TblASM_OPCODE(522), &HDC, 1, 0, 0, 4, 0, 129, 0, 0, 0, "FCOMP ", ""
     AddAOC TblASM_OPCODE(523), &HDC, 1, 0, 0, 5, 0, 129, 0, 0, 0, "FSUB ", ""
     AddAOC TblASM_OPCODE(524), &HDC, 1, 0, 0, 6, 0, 129, 0, 0, 0, "FSUBR ", ""
-    AddAOC TblASM_OPCODE(525), &HDC, 1, 0, 0, 7, 0, 129, 0, 0, 0, "FDIV ", ""
+    AddAOC TblASM_OPCODE(525), &HDC, 1, 0, 0, 7, 0, 129, 44, 0, 0, "FDIV ", ""
     AddAOC TblASM_OPCODE(526), &HDC, 1, 0, 0, 8, 0, 129, 0, 0, 0, "FDIVR ", ""
     AddAOC TblASM_OPCODE(527), &HC0DC, 2, 0, 160, 0, 0, 0, 0, 0, 0, "FADD ST(", "),ST(0)"
     AddAOC TblASM_OPCODE(528), &HC8DC, 2, 0, 160, 0, 0, 0, 0, 0, 0, "FMUL ST(", "),ST(0)"
@@ -1102,13 +1769,13 @@ Private Sub Init_UnASM_Next()
     AddAOC TblASM_OPCODE(530), &HE8DC, 2, 0, 160, 0, 0, 0, 0, 0, 0, "FSUB ST(", "),ST(0)"
     AddAOC TblASM_OPCODE(531), &HF0DC, 2, 0, 160, 0, 0, 0, 0, 0, 0, "FDIVR ST(", "),ST(0)"
     AddAOC TblASM_OPCODE(532), &HF8DC, 2, 0, 160, 0, 0, 0, 0, 0, 0, "FDIV ST(", "),ST(0)"
-    AddAOC TblASM_OPCODE(533), &HDD, 1, 0, 0, 0, 0, 129, 0, 0, 0, "FLD ", ""
+    AddAOC TblASM_OPCODE(533), &HDD, 1, 0, 0, 1, 0, 129, 0, 0, 0, "FLD ", ""
     TblPtrASM(221) = 533
     AddAOC TblASM_OPCODE(534), &HDD, 1, 0, 0, 3, 0, 129, 0, 0, 0, "FST ", ""
     AddAOC TblASM_OPCODE(535), &HDD, 1, 0, 0, 4, 0, 129, 0, 0, 0, "FSTP ", ""
-    AddAOC TblASM_OPCODE(536), &HDD, 1, 0, 0, 5, 0, 0, 0, 0, 0, "FRSTOR ", ""
-    AddAOC TblASM_OPCODE(537), &HDD, 1, 0, 0, 7, 0, 0, 0, 0, 0, "FNSAVE ", ""
-    AddAOC TblASM_OPCODE(538), &HDD, 1, 0, 0, 8, 0, 0, 0, 0, 0, "FNSTSW ", ""
+    AddAOC TblASM_OPCODE(536), &HDD, 1, 0, 0, 5, 0, 131, 0, 0, 0, "FRSTOR ", ""
+    AddAOC TblASM_OPCODE(537), &HDD, 1, 0, 0, 7, 0, 131, 0, 0, 0, "FNSAVE ", ""
+    AddAOC TblASM_OPCODE(538), &HDD, 1, 0, 0, 8, 0, 127, 0, 0, 0, "FNSTSW ", ""
     AddAOC TblASM_OPCODE(539), &HC0DD, 2, 0, 160, 0, 0, 0, 0, 0, 0, "FFREE ST(", ")"
     AddAOC TblASM_OPCODE(540), &HD0DD, 2, 0, 160, 0, 0, 0, 0, 0, 0, "FST ST(", ")"
     AddAOC TblASM_OPCODE(541), &HD8DD, 2, 0, 160, 0, 0, 0, 0, 0, 0, "FSTP ST(", ")"
@@ -1116,7 +1783,7 @@ Private Sub Init_UnASM_Next()
     AddAOC TblASM_OPCODE(543), &HE1DD, 2, 0, 0, 0, 0, 0, 0, 0, 0, "FUCOM", ""
     AddAOC TblASM_OPCODE(544), &HE8DD, 2, 0, 160, 0, 0, 0, 0, 0, 0, "FUCOMP ST(", ")"
     AddAOC TblASM_OPCODE(545), &HE9DD, 2, 0, 0, 0, 0, 0, 0, 0, 0, "FUCOMP", ""
-    AddAOC TblASM_OPCODE(546), &HDE, 1, 0, 0, 0, 0, 132, 0, 0, 0, "FIADD ", ""
+    AddAOC TblASM_OPCODE(546), &HDE, 1, 0, 0, 1, 0, 132, 0, 0, 0, "FIADD ", ""
     TblPtrASM(222) = 546
     AddAOC TblASM_OPCODE(547), &HDE, 1, 0, 0, 2, 0, 132, 0, 0, 0, "FIMUL ", ""
     AddAOC TblASM_OPCODE(548), &HDE, 1, 0, 0, 3, 0, 132, 0, 0, 0, "FICOM ", ""
@@ -1138,7 +1805,7 @@ Private Sub Init_UnASM_Next()
     AddAOC TblASM_OPCODE(564), &HF1DE, 2, 0, 0, 0, 0, 0, 0, 0, 0, "FDIVRP", ""
     AddAOC TblASM_OPCODE(565), &HF8DE, 2, 0, 160, 0, 0, 0, 0, 0, 0, "FDIVP ST(", "),ST(0)"
     AddAOC TblASM_OPCODE(566), &HF9DE, 2, 0, 0, 0, 0, 0, 0, 0, 0, "FDIVP", ""
-    AddAOC TblASM_OPCODE(567), &HDF, 1, 0, 0, 0, 0, 132, 0, 0, 0, "FILD ", ""
+    AddAOC TblASM_OPCODE(567), &HDF, 1, 0, 0, 1, 0, 132, 0, 0, 0, "FILD ", ""
     TblPtrASM(223) = 567
     AddAOC TblASM_OPCODE(568), &HDF, 1, 0, 0, 3, 0, 132, 0, 0, 0, "FIST ", ""
     AddAOC TblASM_OPCODE(569), &HDF, 1, 0, 0, 4, 0, 132, 0, 0, 0, "FISTP ", ""
@@ -1240,10 +1907,10 @@ Private Sub Init_UnASM_Next()
     TblPtrASM(252) = 636
     AddAOC TblASM_OPCODE(637), &HFD, 1, 0, 0, 0, 0, 0, 0, 0, 0, "STD", ""
     TblPtrASM(253) = 637
-    AddAOC TblASM_OPCODE(638), &HFE, 1, 0, 0, 0, 0, 18, 0, 0, 0, "INC ", ""
+    AddAOC TblASM_OPCODE(638), &HFE, 1, 0, 0, 1, 0, 18, 0, 0, 0, "INC ", ""
     TblPtrASM(254) = 638
     AddAOC TblASM_OPCODE(639), &HFE, 1, 0, 0, 2, 0, 18, 0, 0, 0, "DEC ", ""
-    AddAOC TblASM_OPCODE(640), &HFF, 1, 0, 0, 0, 0, 20, 0, 0, 0, "INC ", ""
+    AddAOC TblASM_OPCODE(640), &HFF, 1, 0, 0, 1, 0, 20, 0, 0, 0, "INC ", ""
     TblPtrASM(255) = 640
     AddAOC TblASM_OPCODE(641), &HFF, 1, 0, 0, 2, 0, 20, 0, 0, 0, "DEC ", ""
     AddAOC TblASM_OPCODE(642), &HFF, 1, 0, 0, 3, 0, 20, 0, 0, 0, "CALL ", ""
@@ -1274,3 +1941,4 @@ Private Sub AddAOC(tAOC As ASM_OPCODE, FOC As Integer, OpLen As Byte, _
     tAOC.sEnd = EStr
     
 End Sub
+

@@ -1,5 +1,5 @@
 VERSION 5.00
-Object = "{831FDD16-0C5C-11D2-A9FC-0000F8754DA1}#2.0#0"; "MSCOMCTL.OCX"
+Object = "{831FDD16-0C5C-11D2-A9FC-0000F8754DA1}#2.0#0"; "Mscomctl.ocx"
 Begin VB.Form frmJolieInterface 
    Caption         =   "Structure de l'exe VB6"
    ClientHeight    =   5460
@@ -129,9 +129,9 @@ Attribute VB_Exposed = False
 DefLng A-Z
 
 Private Sub Arbre_NodeClick(ByVal Node As MSComctlLib.Node)
-Dim i, fp As Long
+Dim i As Long, fp As Integer
+Dim dc, ec As Long
 Dim Pmr As frmList
-Dim NodeHexStr As String
 
 If Node.Parent Is Nothing Then Exit Sub
 'si on doubleclique sur une entrée de sub, on ouvre l'éditeur hexa
@@ -140,7 +140,7 @@ If Node.Parent = "Sub Main" Then
     fp = FreeFile
     Open PEexe.exeFILENAMElong For Binary Access Read As #fp
         'temporaire...
-        unASM.FileDeAsm PEexe.exeVB_CODEMAIN, fp, LOF(fp), PEexe.exeVB_CODEMAIN + &H400000, True
+        unASM.FileDeAsm PEexe.exeVB_CODEMAIN, fp, LOF(fp), PEexe.exeVB_CODEMAIN + PEexe.exeOPHEAD.ImageBase, True
     Close #fp
     
     Set Pmr = New frmList
@@ -152,27 +152,41 @@ If Node.Parent = "Sub Main" Then
     Pmr.Show
 
 ElseIf Left$(Node.Parent, 17) = "Point d'entrée : " Then
-    'désassemble un des subs
-    
-    Set Pmr = New frmList
-    Pmr.Caption = "Désassemblage de " & Node.Text
-    Pmr.inList.FontName = "Courier New": Pmr.inList.FontSize = 8
-    i = InStrRev(Node.Text, " ") + 1
-    'ici i = point d'entrée
-    NodeHexStr = "&H" & Mid$(Node.Text, i, Len(Node.Text) - i)
-    If Right$(NodeHexStr, 1) = "h" Then NodeHexStr = Left$(NodeHexStr, Len(NodeHexStr) - 1)
-    i = CLng(NodeHexStr)
-
-    fp = FreeFile
-    Open PEexe.exeFILENAMElong For Binary Access Read As #fp
-        'deasmage
-        unASM.FileDeAsm i, fp, LOF(fp), i + &H400000, True
-    Close #fp
-    'affichage
-    For i = 1 To UBound(unASM.StrDEASM())
-        Pmr.inList.AddItem unASM.StrDEASM(i)
-    Next i
-    Pmr.Show
+    If Left$(Node.Text, 8) = "Longueur" Then
+        'bloc de la zone comprenant le code VB compilé.
+        i = InStrRev(Node.Parent, " ") + 1
+        dc = Val("&H" & Mid$(Node.Parent, i, Len(Node.Parent) - i))
+        i = InStrRev(Node.Text, " ") + 1
+        ec = Val("&H" & Mid$(Node.Text, i, Len(Node.Text) - i - 1))
+        'dc = offset du début
+        'ec = offset de fin
+        i = MsgBox("Voulez-vous désassembler le code ? L'opération peut être longue.", vbInformation + vbYesNoCancel, "VB6 Analyse")
+        If i = vbYes Then
+            DoEvents
+            frmUnAsm.Show
+        End If
+    Else
+        'désassemble un des subs
+        
+        Set Pmr = New frmList
+        Pmr.Caption = "Désassemblage de " & Node.Text
+        Pmr.inList.FontName = "Courier New": Pmr.inList.FontSize = 8
+        i = InStrRev(Node.Text, " ") + 1
+        'ici i = point d'entrée
+        i = Val("&H" & Mid$(Node.Text, i, Len(Node.Text) - i))
+        If i < 0 Then i = i + 32768 + 32768
+        fp = FreeFile
+        Open PEexe.exeFILENAMElong For Binary Access Read As #fp
+            'deasmage local
+            unASM.FileDeAsm i + 1, fp, LOF(fp), i + PEexe.exeOPHEAD.ImageBase, True
+        Close #fp
+        'affichage
+        For i = 1 To UBound(unASM.StrDEASM())
+            Pmr.inList.AddItem unASM.StrDEASM(i)
+        Next i
+        Pmr.Show
+        
+    End If
     
 End If
 End Sub

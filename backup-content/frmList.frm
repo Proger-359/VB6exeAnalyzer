@@ -4,11 +4,11 @@ Begin VB.Form frmList
    ClientHeight    =   3195
    ClientLeft      =   60
    ClientTop       =   345
-   ClientWidth     =   4680
+   ClientWidth     =   6720
    Icon            =   "frmList.frx":0000
    LinkTopic       =   "Form1"
    ScaleHeight     =   3195
-   ScaleWidth      =   4680
+   ScaleWidth      =   6720
    StartUpPosition =   3  'Windows Default
    Begin VB.ListBox inList 
       Height          =   1620
