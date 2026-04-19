@@ -87,6 +87,10 @@ Private Declare Function GetModuleFileNameExA Lib "psapi.dll" (ByVal hProcess As
 Private Declare Function GetModuleInformation Lib "psapi.dll" (ByVal hProcess As Long, ByVal hModule As Long, ByRef lpModInfo As MODULEINFO, ByVal CbSize As Long) As Long
 Private Declare Function EnumProcessModules Lib "psapi.dll" (ByVal hProcess As Long, ByRef lphModule As Long, ByVal cb As Long, ByRef cbNeeded As Long) As Long
 Private Declare Function GetProcessMemoryInfo Lib "psapi.dll" (ByVal hProcess As Long, ppsmemCounters As PROCESS_MEMORY_COUNTERS, ByVal cb As Long) As Long
+'autres informations
+Private Declare Function GetProcessHandleCount Lib "kernel32" (ByVal hProcess As Long, pdwHandleCount As Long) As Long
+Private Declare Function GetPriorityClass Lib "kernel32" (ByVal hProcess As Long) As Long
+Private Declare Function GetProcessShutdownParameters Lib "kernel32" (lpdwLevel As Long, lpdwFlags As Long) As Long
 'manipulation de la mémoire d'un processus :
 Private Declare Function VirtualQueryEx Lib "kernel32" (ByVal hProcess As Long, lpAddress As Any, lpBuffer As MEMORY_BASIC_INFORMATION, ByVal dwLength As Long) As Long
 Private Declare Function ReadProcessMemory Lib "kernel32" (ByVal hProcess As Long, ByVal lpBaseAddress As Any, ByVal lpBuffer As Any, ByVal nSize As Long, lpNumberOfBytesWritten As Long) As Long
@@ -94,7 +98,8 @@ Private Declare Function WriteProcessMemory Lib "kernel32" (ByVal hProcess As Lo
 'fermeture d'un processus :
 Private Declare Function GetExitCodeProcess Lib "kernel32" (ByVal hProcess As Long, lpExitCode As Long) As Long
 Private Declare Function TerminateProcess Lib "kernel32" (ByVal hProcess As Long, ByVal uExitCode As Long) As Long
-
+'"suicide" :
+Private Declare Sub ExitProcess Lib "kernel32" (ByVal uExitCode As Long)
 'infos système :
 Private Declare Sub GetSystemInfo Lib "kernel32" (lpSystemInfo As SYSTEM_INFO)
 
@@ -191,6 +196,23 @@ If LhWnd <> 0 Then
 Else
     GetPIDMemInfo = -1
 End If
+End Function
+
+Public Function GetPIDInfoOthers(pIDval As Long, nHandle As Long, Priority As Long)
+'autres infos...
+Dim LhWnd As Long
+Dim exeAPI As Long
+
+    LhWnd = OpenProcess(PROCESS_QUERY_INFORMATION Or PROCESS_VM_READ, 0, pIDval)
+    
+    If LhWnd <> 0 Then
+        exeAPI = GetProcessHandleCount(LhWnd, nHandle)
+        Priority = GetPriorityClass(LhWnd)
+        exeAPI = CloseHandle(LhWnd)
+    Else
+        GetPIDInfoOthers = -1
+    End If
+    
 End Function
 
 Public Function GetPIDModule(pIDval As Long, outModuleName() As String, outModuleID() As Long, outModuleSize() As Long, outModuleAddr() As Long) As Long

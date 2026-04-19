@@ -1,5 +1,5 @@
 VERSION 5.00
-Object = "{831FDD16-0C5C-11D2-A9FC-0000F8754DA1}#2.0#0"; "Mscomctl.ocx"
+Object = "{831FDD16-0C5C-11D2-A9FC-0000F8754DA1}#2.0#0"; "MSCOMCTL.OCX"
 Begin VB.Form frmJolieInterface 
    Caption         =   "Structure de l'exe VB6"
    ClientHeight    =   5460
@@ -187,7 +187,18 @@ ElseIf Left$(Node.Parent, 17) = "Point d'entrée : " Then
         Pmr.Show
         
     End If
-    
+
+Else
+    'ajout novembre 2008
+    If Node.Image = 16 Then
+        'rva : affichage en hexa
+        i = InStrRev(Node.Text, " ") + 1
+        ec = Val("&h" & Mid$(Node.Text, i)) \ 16
+        If ec <= 0 Then Exit Sub
+        PrintExe PEexe.exeFILENAMElong, ec, 20, frmHexa.Picture1
+        If frmHexa.Visible = False Then frmHexa.Show
+        frmHexa.SetParams PEexe.exeFILENAMElong, ec * 16
+    End If
 End If
 End Sub
 

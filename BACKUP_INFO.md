@@ -1,25 +1,25 @@
 # Backup information
 
-Backup date : 2006-06-14
+Backup date : 2011-02-07
 
-Released on website vbfrance.com with ID 8258
+Raw dump of project folder, never released.
 
-Webpage capture available on archive.org :
-
-http://www.vbfrance.com/codes/ANALYSEUR-EXECUTABLES-VB6-BETA-RELEASE_8258.aspx (archive date : 2007-02-13)
-
-`backup-content/` is the ZIP file content available on that archived webpage.
-
-`distribution/` is the original ZIP file itself.
+backup-content/` is a raw copy of the work folder.
 
 Note : only in french
 
 ### Content :
 
-- Original source code
+- Original source code, with unfinished internal disassembler v2
+
+- Binaries of the program, for self-disassembling test
 
 - Memory dumper tool
+
+- The file README-vb6analyser.txt, an original attempt to explain how works this program
 
 - misc doc used to understand PE executable binaries and ASM
 
 - perdr.exe from the PEReaDer project, an external disassembly tool used by this project for better FPU Opcode decoding.
+
+- win32dasm.exe "patched for VB"

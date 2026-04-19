@@ -1,0 +1,3 @@
+VB6analyse de :             F:\prog-mobile\VB\analyseur\dumper\Dumper-2.exe
+Offset code compilé :        31540 
+Longueur code compilé :      25531 

@@ -21,12 +21,12 @@
 73498E70,120,__vbaFpCSngR4,undef
 73498E70,121,__vbaFpCSngR8,undef
 73498E9E,122,__vbaFpCmpCy,undef
-73498E1B,123,__vbaFpCy,undef
-73498DC5,124,__vbaFpI2,undef
-73498DDC,125,__vbaFpI4,undef
-73498DF3,126,__vbaFpR4,undef
-73498E07,127,__vbaFpR8,undef
-73498DA0,128,__vbaFpUI1,undef
+73498E1B,123,__vbaFpCy,(fp) vers (currency)
+73498DC5,124,__vbaFpI2,(fp) vers (integer)
+73498DDC,125,__vbaFpI4,(single) vers (long)
+73498DF3,126,__vbaFpR4,(single)
+73498E07,127,__vbaFpR8,(double)
+73498DA0,128,__vbaFpUI1,(fp) vers (byte)
 733B4D9B,129,__vbaFreeObj,undef
 733B44C2,130,__vbaFreeStr,undef
 7349009E,131,__vbaFreeVar,undef
@@ -105,7 +105,7 @@
 73475BB3,204,__vbaCyUI1,undef
 7347877F,205,__vbaCyVar,undef
 73475C2E,206,__vbaDateR4,undef
-73475C60,207,__vbaDateR8,undef
+73475C60,207,__vbaDateR8,(fp) vers (date)
 734756B8,208,__vbaDateStr,undef
 734752EB,209,__vbaDateVar,undef
 73471203,210,__vbaDerefAry,undef
@@ -264,17 +264,17 @@
 73475BE8,363,__vbaR4Cy,undef
 73478786,364,__vbaR4ErrVar,undef
 7349AAB5,365,__vbaR4ForNextCheck,undef
-734786BB,366,__vbaR4Sgn,Sgn()
+734786BB,366,__vbaR4Sgn,Sgn(single)
 73475657,367,__vbaR4Str,undef
 73478794,368,__vbaR4Var,undef
 73475BF5,369,__vbaR8Cy,undef
 7347878D,370,__vbaR8ErrVar,undef
-7347CC94,371,__vbaR8FixI2,CInt(Double)
-7347CCAB,372,__vbaR8FixI4,CLng(Double)
+7347CC94,371,__vbaR8FixI2,Fix(Double) vers (integer)
+7347CCAB,372,__vbaR8FixI4,Fix(Double) vers (long)
 7349AAE9,373,__vbaR8ForNextCheck,undef
-7347CCC2,374,__vbaR8IntI2,CInt(Double)
-7347CCD9,375,__vbaR8IntI4,CLng(Double)
-734786F2,376,__vbaR8Sgn,Sgn(Double)
+7347CCC2,374,__vbaR8IntI2,Int(Double) vers (integer)
+7347CCD9,375,__vbaR8IntI4,Int(Double) vers (long)
+734786F2,376,__vbaR8Sgn,Sgn(double)
 73475687,377,__vbaR8Str,undef
 7347879B,378,__vbaR8Var,undef
 7349A18F,379,__vbaRaiseEvent,RaiseEvent
@@ -320,8 +320,8 @@
 7347CA89,419,__vbaStrLike,Like
 7341AA89,420,BASIC_DISPINTERFACE_GetTICount,undef
 734656B9,421,BASIC_DISPINTERFACE_GetTypeInfo,undef
-73474BA2,422,__vbaStrR4,undef
-73474BD6,423,__vbaStrR8,undef
+73474BA2,422,__vbaStrR4,(single) vers (string)
+73474BD6,423,__vbaStrR8,(double) vers (string)
 7347CA77,424,__vbaStrTextCmp,undef
 7347CA9E,425,__vbaStrTextLike,undef
 733AB336,426,__vbaStrToAnsi,undef
@@ -586,7 +586,7 @@
 733B4E08,685,rtcErrObj,Err
 7347539B,686,rtUI1FromErrVar,undef
 7347531E,687,rtcVarDateFromVar,undef
-73485415,688,_adj_fdiv_m32,undef
+73485415,688,_adj_fdiv_m32,(controle safe pentium fdiv)
 7348864C,689,rtcGetSetting,GetSetting()
 73488802,690,rtcSaveSetting,SaveSetting()
 734888BB,691,rtcDeleteSetting,DeleteSetting()

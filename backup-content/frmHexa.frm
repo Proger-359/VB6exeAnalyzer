@@ -5,12 +5,12 @@ Begin VB.Form frmHexa
    ClientHeight    =   4245
    ClientLeft      =   45
    ClientTop       =   330
-   ClientWidth     =   8670
+   ClientWidth     =   8055
    LinkTopic       =   "Form1"
    MaxButton       =   0   'False
    MinButton       =   0   'False
    ScaleHeight     =   4245
-   ScaleWidth      =   8670
+   ScaleWidth      =   8055
    StartUpPosition =   3  'Windows Default
    Begin VB.TextBox Text2 
       Alignment       =   1  'Right Justify
@@ -26,10 +26,10 @@ Begin VB.Form frmHexa
       Height          =   3855
       Left            =   0
       ScaleHeight     =   3795
-      ScaleWidth      =   8355
+      ScaleWidth      =   7755
       TabIndex        =   0
       Top             =   360
-      Width           =   8415
+      Width           =   7815
    End
    Begin VB.TextBox Text1 
       Height          =   285
@@ -42,14 +42,14 @@ Begin VB.Form frmHexa
    Begin VB.VScrollBar VScroll1 
       Height          =   3855
       LargeChange     =   10
-      Left            =   8400
+      Left            =   7800
       TabIndex        =   1
       Top             =   360
       Width           =   255
    End
    Begin VB.CommandButton Command1 
       Caption         =   "Goto offset"
-      Height          =   375
+      Height          =   300
       Left            =   2640
       TabIndex        =   4
       Top             =   0
@@ -85,7 +85,7 @@ Attribute VB_Exposed = False
 
 Private AffFile As String
 Private cOffset As Long
-
+Private InhibR As Boolean
 
 Sub SetParams(LeFichier As String, CurOffset As Long)
 Dim l, s
@@ -94,10 +94,13 @@ cOffset = CurOffset
 
 l = FileLen(LeFichier)
 s = l \ 16
-If s > 32767 Then s = 32767
+If s > 32767 Then s = 32767 'limitation hscrollbar !
 
-VScroll1.Min = 0
-VScroll1.Max = s
+VScroll1.min = 0
+VScroll1.max = s
+InhibR = True
+    VScroll1.Value = cOffset \ 16
+InhibR = False
 
 End Sub
 
@@ -105,7 +108,7 @@ End Sub
 Private Sub Command1_Click()
 Dim tval As Double
 tval = Val("&H" & Text1.Text)
-If tval > 0 And tval < (CLng(VScroll1.Max) * 16) Then
+If tval > 0 And tval < (CLng(VScroll1.max) * 16) Then
     cOffset = CLng((tval \ 16) * 16)
     PrintExe AffFile, cOffset / 16, 24, Picture1
     Me.Caption = "Hex : offset " & Hex(cOffset) & "  (" & cOffset & ")"
@@ -129,12 +132,17 @@ If Len(Text2.Text) > 8 Then Text2.Text = Right$(Text2.Text, 8)
 End Sub
 
 Private Sub VScroll1_Change()
-PrintExe AffFile, VScroll1.Value, 24, Picture1
-cOffset = CLng(VScroll1.Value) * 16
-Me.Caption = "Hex : offset " & Hex(cOffset) & "  (" & cOffset & ")"
+If Not InhibR Then
+    PrintExe AffFile, VScroll1.Value, 20, Picture1
+    cOffset = CLng(VScroll1.Value) * 16
+    Me.Caption = "Hex : offset " & Hex(cOffset) & "  (" & cOffset & ")"
+Else
+    Exit Sub
+End If
 End Sub
 
 Private Sub VScroll1_Scroll()
+PrintExe AffFile, VScroll1.Value, 20, Picture1
 cOffset = CLng(VScroll1.Value) * 16
 Me.Caption = "Hex : offset " & Hex(cOffset) & "  (" & cOffset & ")"
 End Sub

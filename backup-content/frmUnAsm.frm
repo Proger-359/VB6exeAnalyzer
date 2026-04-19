@@ -1,15 +1,55 @@
 VERSION 5.00
-Object = "{831FDD16-0C5C-11D2-A9FC-0000F8754DA1}#2.0#0"; "mscomctl.ocx"
+Object = "{831FDD16-0C5C-11D2-A9FC-0000F8754DA1}#2.0#0"; "MSCOMCTL.OCX"
 Begin VB.Form frmUnAsm 
    Caption         =   "Vue désassemblée"
    ClientHeight    =   4020
    ClientLeft      =   60
    ClientTop       =   345
-   ClientWidth     =   8685
+   ClientWidth     =   8715
    LinkTopic       =   "Form1"
    ScaleHeight     =   4020
-   ScaleWidth      =   8685
+   ScaleWidth      =   8715
    StartUpPosition =   3  'Windows Default
+   Begin VB.PictureBox pctPatch 
+      Appearance      =   0  'Flat
+      BackColor       =   &H80000005&
+      BorderStyle     =   0  'None
+      ForeColor       =   &H80000008&
+      Height          =   290
+      Left            =   1920
+      ScaleHeight     =   285
+      ScaleWidth      =   6135
+      TabIndex        =   8
+      Top             =   240
+      Visible         =   0   'False
+      Width           =   6135
+      Begin VB.TextBox Text1 
+         Appearance      =   0  'Flat
+         Height          =   285
+         Left            =   840
+         TabIndex        =   10
+         Text            =   "0000000000000000"
+         Top             =   0
+         Width           =   1695
+      End
+      Begin VB.Label Label3 
+         Caption         =   "ADD AL"
+         Height          =   285
+         Left            =   2535
+         TabIndex        =   11
+         Top             =   0
+         Width           =   3480
+      End
+      Begin VB.Label Label2 
+         Alignment       =   2  'Center
+         Caption         =   "00400000"
+         Height          =   285
+         Left            =   0
+         TabIndex        =   9
+         Top             =   0
+         Width           =   855
+      End
+   End
    Begin MSComctlLib.ListView ListView1 
       Height          =   3615
       Left            =   0
@@ -121,6 +161,19 @@ Begin VB.Form frmUnAsm
       Top             =   0
       Width           =   1215
    End
+   Begin VB.Menu menu_patch_root 
+      Caption         =   "menupatch"
+      Visible         =   0   'False
+      Begin VB.Menu menu_patch 
+         Caption         =   "Modifier"
+         Index           =   0
+      End
+      Begin VB.Menu menu_patch 
+         Caption         =   "Modifier directement le fichier"
+         Checked         =   -1  'True
+         Index           =   1
+      End
+   End
 End
 Attribute VB_Name = "frmUnAsm"
 Attribute VB_GlobalNameSpace = False
@@ -134,6 +187,7 @@ Attribute VB_Exposed = False
 'Pour désassemblé du code VB
 'par Proger
 'création octobre 2005
+'révision novembre 2008
 
 Option Explicit
 DefLng A-Z
@@ -152,6 +206,11 @@ Private RVAtoGo As String
 Private lImageBase As Long
 Private sFileName As String
 Private lFileLen As Long
+
+Private Declare Sub InvalidateRect Lib "user32" (ByVal hwnd As Long, ByVal t As Long, ByVal bErase As Long)
+Private Declare Sub ValidateRect Lib "user32" (ByVal hwnd As Long, ByVal t As Long)
+Private Declare Function SendMessage Lib "user32" Alias "SendMessageA" (ByVal hwnd As Long, ByVal wMsg As Long, ByVal wParam As Long, lParam As Long) As Long
+Private Const WM_SETREDRAW = &HB
 
 Private Function GotoRVA(ByVal va As Long, Optional iStart As Long = 1) As Long
 'recherche et surligne l'adresse à trouvé,
@@ -192,9 +251,11 @@ TfrmText.inText = ""
     bufs = ListView1.SelectedItem.SubItems(2)
     cmps = "004" '00 40 00 00 : rva des exes VB -il existe des rva étendu mébon
     p = InStr(4, bufs, cmps, vbBinaryCompare)
+    If p <= 0 Then p = InStr(4, bufs, "005", vbBinaryCompare) 'si le fichier décompilé est gros
     If p > 0 And Len(bufs) >= (p + 7) Then
         cmps = Mid$(bufs, p, 8)
         Offs = Val("&H" & cmps)
+        'Offs = RVAtoGo ???
         If Offs > lImageBase And (Offs - lImageBase) < lFileLen Then
             fp = FreeFile
             Offs = Offs - lImageBase
@@ -297,8 +358,9 @@ Dim tFrm As frmList
 Set tFrm = New frmList
     
     tFrm.inList.Clear
+    tFrm.inList.AddItem "Offset ref : String ; Offset data"
     For i = 1 To UBound(ASM_StrIdx())
-        tFrm.inList.AddItem unASM.ASM_LIST(unASM.ASM_StrIdx(i)).sData
+        tFrm.inList.AddItem Hex$(unASM.ASM_LIST(unASM.ASM_StrIdx(i)).rvaCode) & " : " & unASM.ASM_LIST(unASM.ASM_StrIdx(i)).sData & " ; " & Hex$(unASM.ASM_LIST(unASM.ASM_StrIdx(i)).rvaJump)
     Next i
     tFrm.Caption = "Liste des strings trouvées."
     tFrm.Show
@@ -323,6 +385,7 @@ End Sub
 Private Sub Form_Load()
 'précharge, désassemble, analyse, liste le code compilé
 Dim i, j, Csub, fp As Integer
+Dim tt1 As Single
 lImageBase = PEexe.exeOPHEAD.ImageBase
 sFileName = PEexe.exeFILENAMElong
 lFileLen = PEexe.exeFILENAMEsize
@@ -351,17 +414,32 @@ lFileLen = PEexe.exeFILENAMEsize
     If frmPeExe.menu_util(4).Checked Then
         fp = FreeFile
         Open PEexe.exeFILENAMElong For Binary Access Read As #fp
+        tt1 = Timer
         unASM.VBCODE_DeAsm PEexe.exeVB_CODEENTRY + 1, fp, PEexe.exeVB_CODELEN, PEexe.exeVB_CODEENTRY + PEexe.exeOPHEAD.ImageBase
+        frmPeExe.AddInfo "Désassemblage à 100% !", True
+        frmPeExe.AddInfo "Analyse du listing...", False
         Analyse.AsmListingParse fp
+        frmPeExe.AddInfo "Analyse du listing à 100% !", True
+        frmPeExe.AddInfo "Désassemblé en " & Int((Timer - tt1) * 10) / 10 & "s", False
         Close #fp
     Else
+        'déasm via PERDR
+        frmPeExe.AddInfo "Exécution de perdr...", False
         PeReaderExt.ExecPERDR PEexe.exeFILENAMElong
-        PeReaderExt.ParsePERDR
-        fp = FreeFile
-        Open PEexe.exeFILENAMElong For Binary Access Read As #fp
-        PeReaderExt.PeRDR_UnAsmVB PEexe.exeVB_CODEENTRY + 1, fp, PEexe.exeVB_CODELEN, PEexe.exeVB_CODEENTRY + PEexe.exeOPHEAD.ImageBase
-        Analyse.AsmListingParse fp
-        Close #fp
+        frmPeExe.AddInfo "Chargement du listing...", False
+        If PeReaderExt.ParsePERDR Then
+            fp = FreeFile
+            Open PEexe.exeFILENAMElong For Binary Access Read As #fp
+            PeReaderExt.PeRDR_UnAsmVB PEexe.exeVB_CODEENTRY + 1, fp, PEexe.exeVB_CODELEN, PEexe.exeVB_CODEENTRY + PEexe.exeOPHEAD.ImageBase
+            frmPeExe.AddInfo "Lecture à 100% !", True
+            frmPeExe.AddInfo "Analyse du listing...", False
+            Analyse.AsmListingParse fp
+            frmPeExe.AddInfo "Analyse du listing à 100% !", True
+            Close #fp
+        Else
+            MsgBox "Listing désassemblé par perdr non trouvé!", vbExclamation + vbOKCancel
+            ReDim unASM.ASM_LIST(1 To 1) 'évite l'erreur 9 en cas d'appel à UBound()
+        End If
     End If
     
     
@@ -369,20 +447,27 @@ lFileLen = PEexe.exeFILENAMEsize
     DoEvents
     
     'affichage
-    ListView1.ListItems.Clear
+    'ValidateRect ListView1.hwnd, 0&
+    Call SendMessage(ListView1.hwnd, WM_SETREDRAW, False, 0&)
+    With ListView1.ListItems
+    .Clear
     j = UBound(unASM.ASM_LIST)
     For i = 1 To j
-        ListView1.ListItems.Add i, , "00" & Hex$(unASM.ASM_LIST(i).rvaCode)
-        
-        ListView1.ListItems.Item(i).SubItems(1) = unASM.ASM_LIST(i).sHexDump
-        ListView1.ListItems.Item(i).SubItems(2) = unASM.ASM_LIST(i).sUnAsm
-        ListView1.ListItems.Item(i).SubItems(3) = unASM.ASM_LIST(i).sStruct
-        ListView1.ListItems.Item(i).SubItems(4) = unASM.ASM_LIST(i).sData
+        .Add i, , "00" & Hex$(unASM.ASM_LIST(i).rvaCode)
+        .Item(i).SubItems(1) = unASM.ASM_LIST(i).sHexDump
+        .Item(i).SubItems(2) = unASM.ASM_LIST(i).sUnAsm
+        .Item(i).SubItems(3) = unASM.ASM_LIST(i).sStruct
+        .Item(i).SubItems(4) = unASM.ASM_LIST(i).sData
         If i Mod 10000 = 0 Then
             Me.Caption = "VBanalyse - Affichage... " & Int(i / j * 100) & "%"
-            DoEvents
+            'DoEvents
+            Call SendMessage(ListView1.hwnd, WM_SETREDRAW, False, 0&)
         End If
     Next i
+    End With
+    'InvalidateRect ListView1.hwnd, 0&, 0&
+    Call SendMessage(ListView1.hwnd, WM_SETREDRAW, False, 0&)
+    
     
     Me.Caption = "Vue désassemblée de " & PEexe.exeFILENAMElong
     Me.MousePointer = 0
@@ -566,6 +651,8 @@ On Local Error GoTo Wrongness
     bufs = ListView1.SelectedItem.SubItems(2)
     cmps = "004" '00 40 00 00 : rva des exes VB -il existe des rva étendu mébon
     p = InStr(4, bufs, cmps, vbBinaryCompare)
+    If p <= 0 Then p = InStr(4, bufs, "005", vbBinaryCompare) 'en cas de gros fichier ce test peux marcher.
+    If p <= 0 Then p = InStr(4, bufs, "006", vbBinaryCompare) 'en cas de très gros fichier ce test peux marcher.
     If p > 0 And Len(bufs) >= (p + 7) Then
         cmps = Mid$(bufs, p, 8)
         Offs = Val("&H" & cmps)
@@ -582,8 +669,97 @@ On Local Error GoTo Wrongness
     Command1.Enabled = False
     Exit Sub
 Wrongness:
+    'erreur de détection du rva.
     Err.Clear
     Command1.Enabled = False
     
     
+End Sub
+
+Private Sub ListView1_MouseUp(Button As Integer, Shift As Integer, X As Single, Y As Single)
+If Button = 2 Then
+    PopupMenu Me.menu_patch_root
+End If
+End Sub
+
+Private Sub menu_patch_Click(Index As Integer)
+
+Select Case Index
+Case 0
+    Text1.Tag = ListView1.SelectedItem.Index
+    Label2.Caption = ListView1.SelectedItem
+    Text1.Text = ListView1.SelectedItem.SubItems(1)
+    Call Text1_Change
+    pctPatch.Top = ListView1.Top + 360
+    pctPatch.Left = ListView1.Left + 70
+    pctPatch.Visible = True
+    Text1.SetFocus
+Case 1
+    menu_patch(1).Checked = Not menu_patch(1).Checked
+End Select
+
+End Sub
+
+Private Sub Text1_Change()
+Dim ByteTbl(1 To 10) As Byte
+Dim emp As Long
+Dim oc2 As Long, jrva As Long
+'On Local Error Resume Next
+Dim sBuf As String
+
+
+If Len(Text1.Text) > 1 Then
+    sBuf = Left$(Text1.Text & String$(14, "0"), 14)
+    ByteTbl(1) = Val("&h" & Mid$(sBuf, 1, 2))
+    ByteTbl(2) = Val("&h" & Mid$(sBuf, 3, 2))
+    ByteTbl(3) = Val("&h" & Mid$(sBuf, 5, 2))
+    ByteTbl(4) = Val("&h" & Mid$(sBuf, 7, 2))
+    ByteTbl(5) = Val("&h" & Mid$(sBuf, 9, 2))
+    ByteTbl(6) = Val("&h" & Mid$(sBuf, 11, 2))
+    ByteTbl(7) = Val("&h" & Mid$(sBuf, 13, 2))
+    oc2 = &HFFFF And (CLng(ByteTbl(1)) Or CLng(ByteTbl(2)) * 256)
+    
+    If oc2 > 32767 Then oc2 = -(32768 - oc2 + 32768)
+    Label3.Caption = CodeToStr(ByteTbl(), _
+    GetVASM(TblPtrASM(ByteTbl(1)), oc2), _
+    Val("&H" & Label2.Caption), emp, jrva)
+Else
+
+    Label3.Caption = "(invalide)"
+    
+End If
+
+End Sub
+
+Private Sub Text1_KeyPress(KeyAscii As Integer)
+Dim bM As Byte
+Dim i As Long, oFs As Long
+Dim fp As Integer
+Dim sTx As String
+
+If KeyAscii = 13 And Len(Text1.Text) > 1 Then
+    Call Text1_Change
+    ListView1.ListItems(Val(Text1.Tag)).SubItems(1) = Text1.Text
+    ListView1.ListItems(Val(Text1.Tag)).ListSubItems(1).Bold = True
+    ListView1.ListItems(Val(Text1.Tag)).SubItems(2) = Label3.Caption
+    pctPatch.Visible = False
+    If menu_patch(1).Checked Then
+        'modif le fichier
+        oFs = Val("&h" & Label2.Caption) - PEexe.exeOPHEAD.ImageBase
+        fp = FreeFile
+        Open PEexe.exeFILENAMElong For Binary As #fp
+        sTx = Text1.Text
+        For i = 1 To Len(sTx) / 2
+            bM = Val("&h" & Mid$(sTx, (i - 1) * 2 + 1, 2))
+            Put #fp, oFs + i, bM
+        Next i
+        Close #fp
+    End If
+End If
+End Sub
+
+Private Sub Text1_KeyUp(KeyCode As Integer, Shift As Integer)
+Dim lnx As Long
+lnx = Len(ListView1.ListItems(Val(Text1.Tag)).SubItems(1))
+If Len(Text1.Text) > lnx Then Text1.Text = Left$(Text1.Text, lnx)
 End Sub

@@ -42,18 +42,35 @@ End Function
 Sub ExecPERDR(exeToUnAsm As String)
 'execute perdr et attend la fin de l'exécution
 Dim ph As Long, fh As Long, lfp As Integer
-Dim sh As String
+Dim sh As String, tsh As String
+Dim fln As String
 
     sh = PERDR_location & " " & ShortName(exeToUnAsm) & " > tmp-unasm.txt"
     lfp = FreeFile
-    Open App.Path & "\exec.bat" For Output As #lfp
+    fln = App.Path & "\exec.bat"
+    If Dir(fln, vbNormal) <> "" Then
+        Open fln For Input As #lfp
+            Input #lfp, tsh
+            Input #lfp, tsh
+            Input #lfp, tsh
+        Close #lfp
+        If tsh = sh Then
+            If MsgBox("Dernière exécution de perdr sur le même fichier exe. Réutiliser le précédent désassemblage ?", vbYesNo + vbInformation) = vbYes Then
+                Exit Sub
+            End If
+        End If
+    End If
+        
+    Open fln For Output As #lfp
+        Print #lfp, Left$(sh, 2)
         Print #lfp, "cd " & App.Path
         Print #lfp, sh
     Close #lfp
     
-    ph = Shell(App.Path & "\exec.bat", vbNormalFocus)
+    ph = Shell(fln, vbNormalFocus)
     
     Do
+        'boucle attendant la fin d'execution de perdr
         fh = OpenProcess(1024&, 0, ph)
         Sleep 5&
         If fh = 0 Then Exit Do
@@ -77,6 +94,7 @@ Dim gsline() As String
     End If
     
     Erase unASM.ASM_LIST
+    ReDim ASM_LIST(1 To 1000) As VBDEASM
     
     ep = PEexe.exeVB_CODEENTRY + PEexe.exeOPHEAD.ImageBase
     et = PEexe.exeVB_CODEENTRY + PEexe.exeVB_CODELEN + PEexe.exeOPHEAD.ImageBase
@@ -90,7 +108,10 @@ Dim gsline() As String
                 If (rvh >= ep) And (rvh <= et) Then
                     c = c + 1
                     
-                    ReDim Preserve ASM_LIST(1 To c) As VBDEASM
+                    If c Mod 1000 = 0 Then 'accélère grandement le chargement en mémoire
+                        ReDim Preserve ASM_LIST(1 To c + 1000) As VBDEASM
+                    End If
+                    
                     gsline = Split(gline, Chr$(9), , vbBinaryCompare)
                     ASM_LIST(c).rvaCode = rvh
                     'ASM_LIST(c).sHexDump = bArrayHexStr(bArray(), AdV)
@@ -99,6 +120,8 @@ Dim gsline() As String
                     Else
                         ASM_LIST(c).sUnAsm = gsline(1)
                     End If
+                    
+                    If c Mod 5000 = 0 Then DoEvents
                 End If
                 rvh = 0
             End If
@@ -106,6 +129,9 @@ Dim gsline() As String
         Loop
 
     Close #fp
+    If c > 1 Then ReDim Preserve ASM_LIST(1 To c) As VBDEASM
+    
+    ParsePERDR = c > 1
 
 End Function
 
@@ -136,8 +162,8 @@ Dim sBuffer As String, sB2 As String
         ASM_LIST(ta).imDump = iDump
             
             'PERDR : récupération de l'adresse jump RVA (super lent, mais bon...)
-            If bDump = &H68 Or bDump = &HE8 Or bDump = &HBA Or bDump = &H8B Or bDump = &HFF Or bDump = &HC7 Then
-                p = InStr(3, sBuffer, "004", vbBinaryCompare)
+            If bDump = &H68 Or bDump = &HE8 Or bDump = &HBA Or bDump = &H8B Or bDump = &HFF Or bDump = &HC7 Or bDump = &HB8 Then
+                p = InStr(3, sBuffer, "004", vbBinaryCompare) 'DETECTEUR jrva A AMELIORER
                 If p > 0 Then
                     jrva = Val("&h" & Mid$(sBuffer, p, 8))
 
@@ -156,7 +182,7 @@ Dim sBuffer As String, sB2 As String
 NAsm:
     If o Mod 12000 = 0 Then
         'indicateur de progression non bloquant
-        frmPeExe.AddInfo "Désassemblage à " & Int((o - EntryPoint) / (cl - EntryPoint) * 100) & "%..."
+        frmPeExe.AddInfo "Lecture à " & Abs(Int((o - EntryPoint) / (cl - EntryPoint) * 100)) & "%...", True
     End If
     
     o = o + AdV

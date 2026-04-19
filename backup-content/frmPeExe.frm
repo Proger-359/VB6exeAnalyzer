@@ -1,5 +1,5 @@
 VERSION 5.00
-Object = "{F9043C88-F6F2-101A-A3C9-08002B2F49FB}#1.2#0"; "comdlg32.ocx"
+Object = "{F9043C88-F6F2-101A-A3C9-08002B2F49FB}#1.2#0"; "COMDLG32.OCX"
 Begin VB.Form frmPeExe 
    BorderStyle     =   1  'Fixed Single
    Caption         =   "Analyseur de programme VB6 compilé - Proger 2005"
@@ -268,6 +268,26 @@ Begin VB.Form frmPeExe
          Caption         =   "Désassembleur PERDR"
          Index           =   5
       End
+      Begin VB.Menu menu_util 
+         Caption         =   "-"
+         Index           =   6
+      End
+      Begin VB.Menu menu_util 
+         Caption         =   "UnPack PE"
+         Index           =   7
+      End
+   End
+   Begin VB.Menu menu_root 
+      Caption         =   "&?"
+      Index           =   4
+      Begin VB.Menu menu_aide 
+         Caption         =   "Mode d'emploi"
+         Index           =   0
+      End
+      Begin VB.Menu menu_aide 
+         Caption         =   "A propos de..."
+         Index           =   1
+      End
    End
 End
 Attribute VB_Name = "frmPeExe"
@@ -340,9 +360,9 @@ Set TempWork = New MemWork '<== une classe que j'ai dev ya bien longtemps...
             Call OpenEXE_PK("dumpexeanalyse.exe")
             DoEvents
             If exeISVB Then
-                Label4.Caption = "Cet exécutable dépacké est reconnu de VB !"
+                AddInfo "Cet exécutable dépacké est reconnu de VB !"
             Else
-                Label4.Caption = "Cet exécutable dépacké ne semble pas être de VB"
+                AddInfo "Cet exécutable dépacké ne semble pas être de VB"
             End If
 
             MsgBox "Analyse terminé. Le fichier dépacké a été supprimé.", vbInformation + vbOKOnly, "UnPacking"
@@ -442,6 +462,7 @@ Set lFrm = New frmList
 End Sub
 
 Private Sub Form_Load()
+'SUB MAIN
 
     Me.Width = 4715
     List1.Clear
@@ -455,6 +476,8 @@ Private Sub Form_Load()
     #If DEVMODE <> "DEBUG" Then
         AddInfo "test"
     #End If
+    
+    ChDir App.Path
     
     'init du corrélateur (ça existe ce mot?)
     PEexe.VBfunc_Description_Init App.Path & "\VB60_APIDEF.txt"
@@ -487,7 +510,34 @@ Private Sub Form_QueryUnload(Cancel As Integer, UnloadMode As Integer)
 End
 End Sub
 
+Private Sub List1_DblClick()
+MsgBox List1.List(List1.ListIndex), vbOKOnly + vbInformation
+End Sub
+
+Private Sub menu_aide_Click(Index As Integer)
+'menu "?"
+'ajouté en novembre 2008
+
+    Select Case Index
+    Case 0
+        'mode d'emploi
+        MsgBox "1) Menu Main > Ouvrir un executable" & vbCrLf & _
+               "2) Menu Main > Analyser maintenant !" & vbCrLf & _
+               "3) Menu Analyse > Rapport hiérarchisé" & vbCrLf & _
+               "4) Menu Analyse > Listing désassemblé" & vbCrLf & _
+               "Un jour je ferai un vrai howto... un jour!", vbInformation + vbOKOnly, "Utilisation basique"
+
+    Case 1
+        'a propos de (en anglais pour que tous le monde puisse comprendre!)
+        MsgBox "VB6analyse : a VB6 native code compilation partial decompiler. " & vbCrLf & "Base code (c) Proger 2003-2005, proger@cbsky.net" & vbCrLf & _
+               "Modifications, if any : -your credit here-", vbInformation + vbOKOnly, "VB6analyse about..."
+        
+    End Select
+    
+End Sub
+
 Private Sub menu_an_Click(Index As Integer)
+'menu "Analyse"
 Dim i As Long
 Dim fTx As frmResultat
 Dim lFrm As frmList
@@ -497,6 +547,7 @@ Dim frmJI As frmJolieInterface
     Case 1
         Set lFrm = New frmList
         PrintOutPE lFrm.inList
+        lFrm.Caption = "Informations PE"
         lFrm.Visible = True
         
     Case 2
@@ -516,9 +567,10 @@ Dim frmJI As frmJolieInterface
         End If
     
     Case 6
+        If PEexe.exeFILENAMElong = "" Then PEexe.exeFILENAMElong = Me.Text1.Text
         frmHexa.Show
-        frmHexa.SetParams Text1.Text, 0
-        PrintExe Text1.Text, 0, 24, frmHexa.Picture1
+        frmHexa.SetParams PEexe.exeFILENAMElong, 0
+        PrintExe PEexe.exeFILENAMElong, 0, 20, frmHexa.Picture1
         frmHexa.SetFocus
 
     End Select
@@ -543,10 +595,11 @@ Dim eHead As Integer
         AddInfo "Taille du fichier : " & Int(FileLen(tRs) / 1024) & " Ko"
         If IsExe(tRs) Then
             AddInfo "exe validé par header."
-            menu(3).Enabled = True
+            menu(2).Enabled = True
         Else
             AddInfo "exe non validé par header."
-            menu(3).Enabled = False
+            menu(2).Enabled = False
+            menu_root(1).Enabled = True
         End If
     
     Case 2
@@ -569,7 +622,7 @@ Dim eHead As Integer
             AddInfo "Cet exécutable ne semble pas être de VB"
             menu_root(1).Enabled = False
             menu_root(2).Enabled = False
-            menu_root(3).Enabled = False
+            menu_root(3).Enabled = True
         End If
         
         If exeISPACKED Then
@@ -728,9 +781,15 @@ fp = FreeFile
     End Select
 
 End Sub
-Sub AddInfo(StrS As String)
-List1.AddItem StrS
-List1.ListIndex = List1.ListCount - 1
+Sub AddInfo(StrS As String, Optional ReplaceLast As Boolean = False)
+If ReplaceLast Then
+    'ajout en nov.2008 pour éviter le flood.
+    List1.List(List1.ListCount - 1) = StrS
+    List1.ListIndex = List1.ListCount - 1
+Else
+    List1.AddItem StrS
+    List1.ListIndex = List1.ListCount - 1
+End If
 DoEvents
 End Sub
 
@@ -770,6 +829,11 @@ Select Case Index
             Me.menu_util(5).Checked = False
             AddInfo "PERDR introuvable."
         End If
+    Case 7
+        Command12_Click
+        menu_root(1).Enabled = True
+        menu_root(2).Enabled = True
+        
 End Select
 End Sub
 

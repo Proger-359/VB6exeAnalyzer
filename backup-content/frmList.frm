@@ -17,6 +17,17 @@ Begin VB.Form frmList
       Top             =   0
       Width           =   3615
    End
+   Begin VB.Menu menu_root 
+      Caption         =   "Root"
+      Visible         =   0   'False
+      Begin VB.Menu menu_seek 
+         Caption         =   "Rechercher..."
+      End
+      Begin VB.Menu menu_copy 
+         Caption         =   "Tout copier dans le presse-papier"
+         Enabled         =   0   'False
+      End
+   End
 End
 Attribute VB_Name = "frmList"
 Attribute VB_GlobalNameSpace = False
@@ -31,4 +42,39 @@ End Sub
 Private Sub Form_Resize()
 inList.Width = Me.Width - 100
 inList.Height = Me.Height - 350
+End Sub
+
+Private Sub inList_MouseUp(Button As Integer, Shift As Integer, X As Single, Y As Single)
+If Button = 2 Then
+    PopupMenu menu_root
+End If
+End Sub
+
+Private Sub menu_copy_Click()
+Dim i As Long
+
+
+End Sub
+
+Private Sub menu_seek_Click()
+Dim sxt As String, ctx As String
+Dim i As Long
+
+    sxt = InputBox("Taper le texte à rechercher, masque autorisé." & vbCrLf & "La recherche commencera en-dessous de la ligne active.", "Rechercher dans la liste...")
+    If sxt = "" Or sxt = "2" Then
+        Exit Sub
+    Else
+        With inList
+        sxt = "*" & sxt & "*"
+        For i = 0 To .ListCount - 1
+            ctx = .List(i)
+            If ctx Like sxt Then
+                .ListIndex = i 'focus
+                Exit Sub
+            End If
+        Next i
+        End With
+        MsgBox "Aucunes occurences trouvées.", vbInformation + vbOKOnly, "Rechercher..."
+    End If
+
 End Sub

@@ -6,6 +6,7 @@ Attribute VB_Name = "unASM"
 'Par Proger
 'septembre 2003
 'reprise octobre 2005
+'quelques debug en novembre 2008
 '
 ' module de désassemblage de code (80586)
 ' source : juste une liste des opcode.
@@ -427,7 +428,7 @@ s_trva:
 NAsm:
     If o Mod 12000 = 0 Then
         'indicateur de progression non bloquant
-        frmPeExe.AddInfo "Désassemblage à " & Int((o - EntryPoint) / (cl - EntryPoint) * 100) & "%..."
+        frmPeExe.AddInfo "Désassemblage à " & Int((o - EntryPoint) / (cl - EntryPoint) * 100) & "%...", True
     End If
     
     o = o + AdV
@@ -946,25 +947,25 @@ i = 1
     
 End Function
 
-Private Function b4Long(inB() As Byte, ofs As Long) As Long
+Private Function b4Long(inB() As Byte, oFs As Long) As Long
 'renvoi une variable Long a partir de 4 valeur d'un tableau de byte
-    b4Long = inB(ofs)
-    b4Long = b4Long Or CLng(inB(ofs + 1)) * 256
-    b4Long = b4Long Or CLng(inB(ofs + 2)) * 65536
+    b4Long = inB(oFs)
+    b4Long = b4Long Or CLng(inB(oFs + 1)) * 256
+    b4Long = b4Long Or CLng(inB(oFs + 2)) * 65536
     
-    If inB(ofs + 3) < 128 Then
-        b4Long = b4Long Or CLng(inB(ofs + 3)) * 16777216
+    If inB(oFs + 3) < 128 Then
+        b4Long = b4Long Or CLng(inB(oFs + 3)) * 16777216
     Else  'putain de variable signé
-        b4Long = (b4Long Or (CLng(inB(ofs + 3) - 128) * 16777216)) Or &H80000000
+        b4Long = (b4Long Or (CLng(inB(oFs + 3) - 128) * 16777216)) Or &H80000000
     End If
     
 End Function
 
-Private Function b2Int(inB() As Byte, ofs As Long) As Integer
+Private Function b2Int(inB() As Byte, oFs As Long) As Integer
 'renvoi un integer à partir de 2 bytes
 Dim lTmp As Long
 
-    lTmp = &HFFFF And (CLng(inB(ofs)) Or CLng(inB(ofs + 1)) * 256)
+    lTmp = &HFFFF And (CLng(inB(oFs)) Or CLng(inB(oFs + 1)) * 256)
     If lTmp > 32767 Then lTmp = -(32768 - lTmp + 32768)
     b2Int = lTmp
     

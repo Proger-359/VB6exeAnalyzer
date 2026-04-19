@@ -157,7 +157,7 @@ cp = UBound(PEexe.exeVB_EP())
             
 
             'détermine si le saut est un appel vers qq chose d'existant
-            If bDump = &H68 Or bDump = &HE8 Or bDump = &HBA Or bDump = &H8B Or bDump = &HFF Or bDump = &HC7 Then
+            If bDump = &H68 Or bDump = &HE8 Or bDump = &HBA Or bDump = &H8B Or bDump = &HFF Or bDump = &HC7 Or bDump = &HB8 Then
                 For i = 1 To RVAT_Len
                     If RVAT_LIST(i).rva = jrva Then
                         ASM_LIST(ta).sStruct = RVAT_LIST(i).StrS
@@ -264,7 +264,7 @@ cp = UBound(PEexe.exeVB_EP())
 NAsm:
     If ta Mod 12000 = 0 Then
         'indicateur de progression non bloquant
-        frmPeExe.AddInfo "Analyse à " & Int(ta / rva * 100) & "%..."
+        frmPeExe.AddInfo "Analyse du listing à " & Int(ta / rva * 100) & "%...", True
     End If
     
     Next ta
