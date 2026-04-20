@@ -1,8 +1,8 @@
 # VB6 source
-*.bas linguist-language=VisualBasic
-*.cls linguist-language=VisualBasic
-*.frm linguist-language=VisualBasic
-*.ctl linguist-language=VisualBasic
+*.bas linguist-language=vb6
+*.cls linguist-language=vb6
+*.frm linguist-language=vb6
+*.ctl linguist-language=vb6
 
 # VB6 project files (INI-like)
 *.vbp linguist-language=INI
