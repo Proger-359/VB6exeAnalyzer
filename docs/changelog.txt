@@ -1,0 +1,30 @@
+31 janvier 2005 13:26:44 :
+intégration de memwork.cls et de l'util original qui l'utilise
+01 décembre 2005 17:23:17 :
+- Interface principale réduite aux fonctions utiles. - Sérieuse amélioration et débogage du désassembleur. Dans sa version actuelle, environ 85% du code est correctement désassemblé (contre 1% de la dernière mise à jour!!!) - Débogage de la présentation du code désassemblé. - Nouvelle interface pour le désassembleur/interpréteur. - L'interpéteur retrouve les appels aux API des DLL importé PE (en gros msvbm60.dll) - L'analyse de la tables des Subs a été revu. Tous les "appels" sont trouvé, en revanche ils ne sont pas encore associé à un form/objet/module ni distingué sub/function/event.
+02 décembre 2005 00:28:26 :
+- débogage du désassembleur (en l'occurence certaines instructions FPU et des inversions de présentation). - désassembleur : récupère les appelles aux strings (chaine de caractères) !
+02 décembre 2005 19:20:09 :
+- débogage du désassembleur (correction de certaines instructions standards mal interprétés). - amélioration de la récupération des strings (strings variable, pas les propriétés!). - amélioration de l'outil d'aperçu hexa.
+04 décembre 2005 16:41:40 :
+- débogage du désassembleur : meilleur gestion du prefix opsize, divers "fix" pour des instructions usuelles mal lu. - interpréteur : meilleur gestion des appels (retrouve plus exhaustivement les api et les strings). - désassembleur : ajout d'une fonction "follow rva" pour lire l'emplacement appelé par une instruction.
+11 décembre 2005 11:39:03 :
+- désassembleur : 4 nouvelles instructions correctement désassemblé, désassemblage plus rapide. - interpréteur : meilleur récupération des strings, possibilité de rechercher dans le listing, suivi des jump/call, suivi des subs.
+21 décembre 2005 17:39:00 :
+- NOUVELLE analyse des subs : beaucoup plus précise, elle associe le sub avec la feuille et l'objet! (pour l'instant le rapprochement entre la valeur hexa de l'objet et le nom de l'objet n'est pas faite). - gros correctif dans l'analyse des modules : une lecture recalé m'a permis d'enlever beaucoup de code de debug.
+24 décembre 2005 18:31:16 :
+- désassembleur : correction de la gestion du préfix 16bits, utilisé par VB lorsqu'on travail avec les integer. - interpréteur : optimisation de l'algo, soit 50% plus rapide. NOUVEAU : retrouve les appels aux API déclarés (declare sub) dans le code désassemblé. Possibilité de lister les strings trouvés dans une listbox séparé
+27 décembre 2005 00:14:29 :
+- débogage pour pouvoir lire les fichiers exe vb6 complexes (si la version précédente plantais sur votre fichier de test, essayez cette version). - interface : form principal revu, tous est accessible via menus. - nouvelles fonctions pour exporter sous forme de fichiers textes les résultats d'analyse : idéal pour ceux qui veulent continuer le projet, refaire une interface à leur goût, etc... et qui n'ont pas le courage d'étudier mon programme dans le détail :D - désassembleur : 2 instructions corrigés. Bug connu : les sauts conditionnels sont souvent incorrect. Il devient difficile de débugger le désassembleur, je dois songer à un refaire un tout neuf. - retouche de la présentation des subs dans l'interpréteur et le rapport hiérarchisé. - et tous pleins de retouches de-ci de-là ...
+19 janvier 2006 11:07:08 :
+- désassembleur : correction de 3 instructions (dont les dword ptr negatif). Pour les sauts conditionnels, j'aurai pu remplacer les je/jne par jz/jnz mais c'est bidon :p - interpréteur : intégration des "EP", il s'agit de points d'entrées polyvalents utilisés pour définir l'appel aux objets (enfin... je suppose! en revanche c'est très utile pour mieux comprendre le code désassemblé.) - analyseur : divers debug dont la récup des subs d'objets. - divers : quelques modifs dans la présentation du rapport hiérarchisé, et correction de quelques plantage.
+22 janvier 2006 01:54:23 :
+- analyseur : un pré-scan du code compilé permet de trouver quelques subs supplémentaires (en l'occurence les sub des modules .bas) - interpréteur : retrouve les appels aux subs ("Call Sub x"). Trouve les références aux objets, mais incapable de savoir duquel il s'agit... Ces deux fonctions ne sont pas exhaustive! - interface : rajout d'indicateurs de progression lors du désassemblage (pour éviter de figer trop longtemps l'application). Rajout de deux outils (usage perso...). Ajout de deux rva dans le rapport hiérarchisé, ce sont les deux rva "racine" pour l'analyse de tout programme VB. - debug : ne plante plus lorsqu'il y a un sub main.
+14 juin 2006 00:52:33 :
+- Nouvel outil : désassemblage avec PERDR : le listing est beaucoup plus précis, l'analyse est donc plus exacte, en revanche c'est beaucoup plus lent qu'avec ma routine de désassemblage. - Interpréteur : Retrouve de façon beaucoup plus précise et exhaustive l'appel à un contrôle dans le code compilé, ainsi que la propriété demandé. La liste des propriétés identifié n'est pas complète, d'où certaines erreurs lorsque le programme indique la propriété du contrôle. Toutefois cette étape d'interprétation est importante : en effet, quelques ajouts et il sera possible de reconstituer du code tel que form1.label5.caption = "toto" ou form2.command2.enabled = True . - réorganisation de certaines fonctions et debug de quelques fonctionnalités.
+14 juin 2006 00:55:50 :
+Note : Téléchargez PERDR à cette adresse : http://sourceforge.net/projects/perdr . Rajouter l'exécutable pur (perdr.exe, environ 300Ko) dans le même dossier que le projet.
+17 novembre 2008 23:23:27 :
+- Différents petits correctifs suite aux plantages divers lors de tentatives de désassemblage sur des .exe complexes. - Recherches des strings ref et obj ref plus complète. - Ajout d'une paire d'outils qui manquaient (dans les StrRef, faites un clique-droit dans la liste : un menu apparaitra).
+17 novembre 2008 23:27:35 :
+- Divers correctifs à cause de plantages lors de tentative de décompilation de .exe lourd/complexes et autres micro-modifs. - Ajout d'outils qui faisaient défaut (ex : dans le StrRef, clique-droit dans la liste). - Recherche un peu plus complète des strings ref et obj ref.

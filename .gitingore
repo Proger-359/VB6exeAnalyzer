@@ -1,4 +1,26 @@
-# Windows junk
+# VB useless files
+*.vbw
+*.vbg
+*.log
+
+# local binaries
+*.exe
+*.dll
+*.ocx
+*.exp
+*.lib
+
+# junk
 Thumbs.db
 Desktop.ini
 .DS_Store
+
+# backups
+*.bak
+*.old
+*.tmp
+
+# Misc
+*.swp
+*.swo
+*~
