@@ -26,7 +26,7 @@ A Visual Basic 6 native code disassembler written itself in VB6, originally deve
 
 ## Screenshots
 
-Original screenshot 
+Original screenshot (`/screenshots/demo.jpg`)
 
 ![Main UI](D:\FTP\TI\vb6-legacy\8258\repo\screenshots\demo.jpg)
 
@@ -68,7 +68,7 @@ Original screenshot
 
 ## Historical context
 
-This project was originally released on www.vbfrance.com (website before codes-sources.com) around 2003.
+This project was originally released on www.vbfrance.com (website before codes-sources.com) around 2003 (link to archive.org [here]([ANALYSEUR D'EXECUTABLES VB6 (BETA RELEASE) désassembleur, analyse, executable, décompilateur, analyseur ☼ Code source N°8258 ☼ Visual Basic, VB6, VB.NET, VB 2005](https://web.archive.org/web/20070213010640/http://www.vbfrance.com/codes/ANALYSEUR-EXECUTABLES-VB6-BETA-RELEASE_8258.aspx)))
 
 Only VBDE and patched Win32DAsm were able to correctly parse VB6 compilated binaries in native mode when this project started.
 
